@@ -5,6 +5,15 @@ import { prepareRecordingVideo, sourceCropRect } from "./cropped-video.js";
 let recordingContext = {};
 const withRecordingContext = status => ({ ...status, ...recordingContext });
 
+const keepAliveVideo = typeof document !== "undefined" ? document.createElement("video") : null;
+if (keepAliveVideo) {
+  keepAliveVideo.autoplay = true;
+  keepAliveVideo.muted = true;
+  keepAliveVideo.playsInline = true;
+  keepAliveVideo.style.display = "none";
+  document.body?.appendChild(keepAliveVideo);
+}
+
 async function backgroundMessage(type, data = {}) {
   const response = await chrome.runtime.sendMessage({ target: "background", type, ...data });
   if (!response?.ok) throw new Error(response?.error || "The extension did not respond.");
@@ -37,9 +46,19 @@ const recorder = new PageRecorder({
     } catch (error) {
       console.warn("Using the available source resolution for recording:", error.message);
     }
+    if (keepAliveVideo && source) {
+      keepAliveVideo.srcObject = source;
+      keepAliveVideo.play().catch(() => {});
+    }
     return prepareRecordingVideo(source, mobile, viewport, error => recorder.stop(error.message));
   },
-  onStatus: status => backgroundMessage("STATUS_CHANGED", { status: withRecordingContext(status) }),
+  onStatus: status => {
+    if (["idle", "error"].includes(status.phase) && keepAliveVideo) {
+      keepAliveVideo.pause();
+      keepAliveVideo.srcObject = null;
+    }
+    return backgroundMessage("STATUS_CHANGED", { status: withRecordingContext(status) });
+  },
   download: async (url, filename) => {
     const { downloadId } = await backgroundMessage("DOWNLOAD", { url, filename });
     // Keep the file and its blob URL alive until Chrome has copied every byte.

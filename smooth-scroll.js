@@ -52,11 +52,13 @@ export function scrollPage(command) {
   }
   const savedStyles = [];
   for (const el of elementsToStyle) {
-    for (const property of ["scroll-behavior", "scroll-snap-type", "overflow-anchor"]) {
+    for (const property of ["scroll-behavior", "scroll-snap-type", "overflow-anchor", "will-change"]) {
       savedStyles.push({
         el, property, value: el.style.getPropertyValue(property), priority: el.style.getPropertyPriority(property),
       });
-      el.style.setProperty(property, property === "scroll-behavior" ? "auto" : "none", "important");
+      if (property === "will-change") el.style.setProperty(property, "scroll-position", "important");
+      else if (property === "scroll-behavior") el.style.setProperty(property, "auto", "important");
+      else el.style.setProperty(property, "none", "important");
     }
   }
 
