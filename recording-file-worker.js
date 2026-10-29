@@ -2,6 +2,7 @@
 // here; neither the recorder nor the webpage holds the complete video in RAM.
 let access;
 let position = 0;
+let lastFlush = 0;
 let queue = Promise.resolve();
 
 self.onmessage = ({ data }) => {
@@ -20,7 +21,12 @@ self.onmessage = ({ data }) => {
           offset += written;
           position += written;
         }
-        // Write the chunk to the file. Sync flush is performed when recording finishes.
+        // Keep file writes continuous while amortizing durable flushes. This
+        // runs on the disk worker, never on the captured page or frame worker.
+        if (performance.now() - lastFlush >= 5000) {
+          access.flush();
+          lastFlush = performance.now();
+        }
       } else if (data.type === "FINISH") {
         if (!access) throw new Error("The recording file is closed.");
         await access.flush();

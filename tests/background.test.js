@@ -176,7 +176,7 @@ test("mobile mode emulates the original tab before capture without resizing its 
   assert.equal(start.viewport.height, 760);
   assert.equal(start.mobileSessionId, h.sessionStorage.nativeMobileViewport.sessionId);
   const metrics = h.calls.find(call => call.method === "Emulation.setDeviceMetricsOverride");
-  assert.deepEqual(metrics.params, { width: 390, height: 844, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 844, scale: 760 / 844, dontSetVisibleSize: true });
+  assert.deepEqual(metrics.params, { width: 390, height: 844, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 844, scale: 760 / 844, dontSetVisibleSize: false });
   assert.ok(h.calls.indexOf(metrics) < h.calls.findIndex(call => call.type === "CAPTURE"));
   assert.equal(h.calls.some(call => call.type === "WINDOW_UPDATE"), false);
   assert.equal(h.calls.some(call => call.type === "SCRIPT"), false);
@@ -373,4 +373,25 @@ test("next-point command visits saved positions once in order with scrolling swi
   const positions = h.calls.filter(call => call.type === "SCRIPT" && call.args?.[0]?.action === "point");
   assert.deepEqual(positions.map(call => call.args[0].top), [940, 3760]);
   assert.ok(positions.every(call => call.args[0].settings.durationMs === 1500));
+});
+
+test("native mobile capture sizes only the page surface and restores it without resizing the browser", async () => {
+  const h = await setup();
+  h.preferences[MOBILE_SETTINGS_KEY] = { enabled: true, width: 390, height: 844 };
+  await h.toggleRecording({ id: 42, windowId: 9, url: "https://example.com" });
+  const start = h.calls.find(call => call.type === "START");
+  assert.equal(start.viewport.mobile.nativeSurface, true);
+  const surface = h.calls.find(call => call.method === "Emulation.setVisibleSize");
+  assert.deepEqual(surface.params, { width: 351, height: 760 });
+  assert.equal(h.calls.some(call => call.type === "WINDOW_UPDATE"), false);
+  const session = h.sessionStorage.nativeMobileViewport;
+  const { refreshMobileViewport, closeMobileViewport } = await import("../mobile-viewport.js");
+  const before = h.calls.filter(call => call.method === "Emulation.setDeviceMetricsOverride").length;
+  chrome.tabs.get = async () => ({ id: 42, windowId: 9, width: 390, height: 844 });
+  await refreshMobileViewport(session);
+  assert.equal(h.calls.filter(call => call.method === "Emulation.setDeviceMetricsOverride").length, before,
+    "our surface resize must not cause recursive preview shrinking");
+  await closeMobileViewport({ tabId: 42, mobileSessionId: session.sessionId });
+  const surfaces = h.calls.filter(call => call.method === "Emulation.setVisibleSize");
+  assert.deepEqual(surfaces.at(-1).params, { width: 1100, height: 760 });
 });

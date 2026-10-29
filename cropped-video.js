@@ -16,8 +16,14 @@ export function sourceCropRect(region, videoWidth, videoHeight) {
 }
 
 export async function prepareRecordingVideo(source, mobile, viewport = {}, onError) {
-  if (!mobile) return { stream: source };
-  const output = mobile;
+  const size = source.getVideoTracks()[0].getSettings();
+  if (mobile?.nativeSurface && size.width === mobile.outputWidth && size.height === mobile.outputHeight) {
+    return { stream: source, stats: () => ({ path: "Native mobile capture", targetFps: viewport.frameRate }) };
+  }
+  if (!mobile && (!viewport.outputWidth || (size.width === viewport.outputWidth && size.height === viewport.outputHeight))) {
+    return { stream: source, stats: () => ({ path: "Native tab capture", targetFps: viewport.frameRate }) };
+  }
+  const output = mobile || viewport;
   const frameRate = viewport.frameRate || DEFAULT_OUTPUT_SETTINGS.frameRate;
   const frameInterval = 1000 / frameRate;
   const contentWidth = output.contentWidth || output.outputWidth || output.width;
@@ -47,7 +53,8 @@ export async function prepareRecordingVideo(source, mobile, viewport = {}, onErr
   let fallbackTimer;
   let heartbeat;
   let lastSubmission = 0;
-  let nextNativeFrameTime;
+  const metrics = { path: "Canvas fallback", targetFps: frameRate, received: 0, forwarded: 0 };
+  let sampleTime = performance.now(), sampleReceived = 0, sampleForwarded = 0;
 
   function submitFrame() {
     if (released || outputTrack?.readyState !== "live") return;
@@ -63,6 +70,14 @@ export async function prepareRecordingVideo(source, mobile, viewport = {}, onErr
     const crop = sourceCropRect(region, width, height);
     context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, contentWidth, contentHeight);
     submitFrame();
+    metrics.forwarded++;
+    const now = performance.now();
+    if (now - sampleTime >= 1000) {
+      const seconds = (now - sampleTime) / 1000;
+      metrics.sourceFps = (metrics.received - sampleReceived) / seconds;
+      metrics.outputFps = (metrics.forwarded - sampleForwarded) / seconds;
+      sampleTime = now; sampleReceived = metrics.received; sampleForwarded = metrics.forwarded;
+    }
   }
   function refreshFrame() {
     if (lastFrame) draw(lastFrame, lastFrame.displayWidth || lastFrame.codedWidth, lastFrame.displayHeight || lastFrame.codedHeight);
@@ -150,6 +165,7 @@ export async function prepareRecordingVideo(source, mobile, viewport = {}, onErr
             if (done) throw new Error("The captured video frame stream ended.");
             try {
               if (released || !nativeActive) continue;
+              metrics.received++;
               const cached = frame.clone();
               lastFrame?.close();
               lastFrame = cached;
@@ -198,7 +214,7 @@ export async function prepareRecordingVideo(source, mobile, viewport = {}, onErr
       // Painting is required by canvas capture even for an unchanged picture.
       refreshFrame();
     }, 100);
-    return { stream, release, requestFrame: refreshFrame };
+    return { stream, release, requestFrame: refreshFrame, stats: () => ({ ...metrics }) };
   } catch (error) {
     release();
     throw error;

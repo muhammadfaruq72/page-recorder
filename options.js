@@ -298,6 +298,8 @@ void initializeScrolling();
 void loadShortcuts();
 
 async function refreshRecorderStatus() {
+  // Hidden settings tabs must not keep polling the recording renderer.
+  if (document.visibilityState === "hidden") return;
   const element = document.querySelector("#recorder-status");
   try {
     const title = await chrome.action.getTitle({});
@@ -307,12 +309,20 @@ async function refreshRecorderStatus() {
     if (contexts.length) {
       const response = await chrome.runtime.sendMessage({ target: "recorder", type: "STATUS" });
       const size = response?.status?.settings;
-      if (size?.width) element.textContent += ` Video: ${size.width} × ${size.height}, ${size.frameRate} FPS.`;
+      const perf = response?.status?.performance;
+      if (size?.width) element.textContent += ` Video: ${size.width} × ${size.height}, target ${perf?.targetFps || size.frameRate || outputSettings.frameRate} FPS.`;
+      if (response?.status?.mimeType) element.textContent += ` ${/hvc1|hev1/.test(response.status.mimeType) ? "HEVC" : /avc1|avc3/.test(response.status.mimeType) ? "H.264" : "MP4"}.`;
+      if (perf?.path) element.textContent += ` ${perf.path}.`;
+      if (response?.status?.phase === "recording" && Number.isFinite(perf?.sourceFps)) {
+        element.textContent += ` Recent capture: ${perf.sourceFps.toFixed(0)} FPS; forwarded: ${perf.outputFps.toFixed(0)} FPS.`;
+      }
+      if (Number.isFinite(perf?.received)) element.textContent += ` Frames received: ${perf.received}; forwarded: ${perf.forwarded}.`;
     }
   } catch (error) { element.textContent = error.message; }
 }
 void refreshRecorderStatus();
 setInterval(refreshRecorderStatus, 1500);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) void refreshRecorderStatus(); });
 
 const collectPoints = document.querySelector("#points-collect");
 const clearPoints = document.querySelector("#points-clear");

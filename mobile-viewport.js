@@ -15,7 +15,7 @@ function metrics(session, width, height) {
   return {
     width: session.width, height: session.height, deviceScaleFactor: session.exportScale || 1,
     mobile: true, screenWidth: session.width, screenHeight: session.height,
-    scale, dontSetVisibleSize: true,
+    scale, dontSetVisibleSize: false,
   };
 }
 
@@ -23,11 +23,12 @@ function viewport(session, available, scale) {
   return {
     width: available.width, height: available.height,
     mobile: {
+      nativeSurface: true,
       width: session.width, height: session.height,
       ...scaledOutputSize(session.width, session.height, session.exportScale || 1),
       region: {
-        left: 0, top: 0, width: session.width * scale, height: session.height * scale,
-        viewportWidth: available.width, viewportHeight: available.height,
+        left: 0, top: 0, width: session.width, height: session.height,
+        viewportWidth: session.width, viewportHeight: session.height,
       },
     },
   };
@@ -44,6 +45,9 @@ export async function startMobileViewport(tab, settings, sessionId) {
     throw new Error(`Mobile mode could not connect to this tab. Close Inspect/DevTools or another debugger and try again. ${error.message}`);
   }
   try {
+    const initialTab = await chrome.tabs.get(tab.id);
+    const initialWindow = await chrome.windows.get(tab.windowId);
+    session.frameInsets = { width: initialWindow.width - initialTab.width, height: initialWindow.height - initialTab.height };
     await chrome.storage.session.set({ [SESSION_KEY]: session });
     await chrome.debugger.sendCommand(target, "Page.enable");
     await chrome.debugger.sendCommand(target, "Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
@@ -71,12 +75,24 @@ export async function refreshMobileViewport(session, { settle = false } = {}) {
       if (stable >= 3 && Date.now() - start >= 250) break;
     }
   }
+  // After setting a native mobile surface, tabs.get reports that emulated
+  // surface rather than the browser container. Derive available space from
+  // the unchanged window bounds so our own resize events cannot shrink it.
+  if (session.frameInsets) {
+    const bounds = await chrome.windows.get(session.windowId);
+    available = { ...available, width: Math.max(1, bounds.width - session.frameInsets.width),
+      height: Math.max(1, bounds.height - session.frameInsets.height) };
+  }
   const override = metrics(session, available.width, available.height);
   const size = `${available.width}:${available.height}:${override.deviceScaleFactor}`;
   if (appliedSizes.get(session.sessionId) !== size) {
     appliedSizes.set(session.sessionId, size);
     try {
       await chrome.debugger.sendCommand({ tabId: session.tabId }, "Emulation.setDeviceMetricsOverride", override);
+      await chrome.debugger.sendCommand({ tabId: session.tabId }, "Emulation.setVisibleSize", {
+        width: Math.max(1, Math.round(session.width * override.scale)),
+        height: Math.max(1, Math.round(session.height * override.scale)),
+      });
     } catch (error) {
       appliedSizes.delete(session.sessionId);
       throw error;
@@ -93,8 +109,17 @@ export async function closeMobileViewport(status) {
   await chrome.storage.session.remove(SESSION_KEY);
   appliedSizes.delete(session.sessionId);
   const target = { tabId: session.tabId };
+  let restore = [];
+  if (session.frameInsets) {
+    try {
+      const bounds = await chrome.windows.get(session.windowId);
+      restore = [["Emulation.setVisibleSize", { width: Math.max(1, bounds.width - session.frameInsets.width),
+        height: Math.max(1, bounds.height - session.frameInsets.height) }]];
+    } catch { /* A closed browser window needs no visible-size restoration. */ }
+  }
   for (const [method, params] of [
     ["Emulation.clearDeviceMetricsOverride", {}],
+    ...restore,
     ["Emulation.setTouchEmulationEnabled", { enabled: false }],
   ]) {
     try { await chrome.debugger.sendCommand(target, method, params); }

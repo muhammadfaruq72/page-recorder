@@ -304,3 +304,17 @@ test("MP4 recording works when Arc requires a fully specified HEVC codec", async
   await waitFor(() => h.recorder.status.phase === "idle");
   assert.match(h.downloads[0].filename, /\.mp4$/);
 });
+
+test("explicit high resolution exports are not silently reduced to the H.264 bound", () => {
+  const size = captureSize({ width: 1280, height: 960, outputWidth: 3840, outputHeight: 2880 }, true);
+  assert.equal(size.maxWidth, 3840);
+  assert.equal(size.maxHeight, 2880);
+});
+
+test("native mobile capture requests only exported mobile pixels instead of the surrounding tab", () => {
+  const size = captureSize({ width: 1400, height: 1000, mobile: { nativeSurface: true, outputWidth: 1170, outputHeight: 2532 } });
+  assert.equal(size.minWidth, 1170);
+  assert.equal(size.maxWidth, 1170);
+  assert.equal(size.minHeight, 2532);
+  assert.equal(size.maxHeight, 2532);
+});

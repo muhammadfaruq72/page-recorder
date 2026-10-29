@@ -37,11 +37,14 @@ export function recordingFilename(mimeType, date = new Date(), prefix = "recordi
 
 export function captureSize({ width, height, devicePixelRatio = 1, mobile, outputWidth, outputHeight } = {}, h264 = false) {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return {};
+  if (mobile?.nativeSurface && mobile.outputWidth > 0 && mobile.outputHeight > 0) {
+    return { minWidth: mobile.outputWidth, maxWidth: mobile.outputWidth, minHeight: mobile.outputHeight, maxHeight: mobile.outputHeight };
+  }
   if (mobile?.outputWidth > 0 && mobile?.outputHeight > 0 && mobile.region?.width > 0 && mobile.region?.height > 0) {
     // Request enough source pixels for the mobile crop, including the unused
-    // portion of the tab. Chromium's HiDPI tab capturer can rasterize above the
-    // display's pixel density. A margin covers sharing-banner height changes.
-    const wantedScale = Math.max(mobile.outputWidth / mobile.region.width, mobile.outputHeight / mobile.region.height) * 1.125;
+    // portion of the tab. Final geometry is measured again after sharing
+    // banners appear, so oversampling the entire tab is unnecessary.
+    const wantedScale = Math.max(mobile.outputWidth / mobile.region.width, mobile.outputHeight / mobile.region.height);
     const scale = Math.min(wantedScale, 8192 / width, 8192 / height);
     const captureWidth = Math.min(8192, Math.max(2, Math.ceil(width * scale / 2) * 2));
     const captureHeight = Math.min(8192, Math.max(2, Math.ceil(height * scale / 2) * 2));
@@ -49,13 +52,10 @@ export function captureSize({ width, height, devicePixelRatio = 1, mobile, outpu
     return { minWidth: captureWidth, maxWidth: captureWidth, minHeight: captureHeight, maxHeight: captureHeight };
   }
   if (outputWidth > 0 && outputHeight > 0) {
-    const landscape = width >= height;
-    const maxBoundW = h264 ? (landscape ? 4096 : 2304) : 8192;
-    const maxBoundH = h264 ? (landscape ? 2304 : 4096) : 8192;
-    const scale = Math.min(Math.max(outputWidth / width, outputHeight / height), maxBoundW / width, maxBoundH / height);
-    const captureWidth = Math.min(maxBoundW, Math.max(2, Math.ceil(width * scale / 2) * 2));
-    const captureHeight = Math.min(maxBoundH, Math.max(2, Math.ceil(height * scale / 2) * 2));
-    return { maxWidth: captureWidth, maxHeight: captureHeight };
+    const scale = Math.min(Math.max(outputWidth / width, outputHeight / height), 8192 / width, 8192 / height);
+    const captureWidth = Math.min(8192, Math.max(2, Math.ceil(width * scale / 2) * 2));
+    const captureHeight = Math.min(8192, Math.max(2, Math.ceil(height * scale / 2) * 2));
+    return { minWidth: captureWidth, maxWidth: captureWidth, minHeight: captureHeight, maxHeight: captureHeight };
   }
   const landscape = width >= height;
   const maxWidth = h264 && !landscape ? 2304 : 4096;
@@ -117,6 +117,8 @@ export class PageRecorder {
     clearTimeout(this.autoStopTimer);
     this.encodingSize = undefined;
     this.autoStopTimer = undefined;
+    this.videoStats = undefined;
+    this.lastVideoStats = undefined;
     const options = { ...DEFAULT_OUTPUT_SETTINGS, ...viewport };
     this.frameRate = options.frameRate;
     this.codec = options.codec;
@@ -129,8 +131,8 @@ export class PageRecorder {
         ? "This browser cannot record MP4. Update the browser to a version with MP4 recording support."
         : `The selected ${this.codec === "h264" ? "H.264" : "HEVC"} MP4 codec is unavailable. Choose Auto or another MP4 codec.`);
       if (this.codec === "auto" && (viewport.outputWidth || viewport.width)) {
-        const estW = viewport.outputWidth || viewport.width;
-        const estH = viewport.outputHeight || viewport.height;
+        const estW = viewport.mobile?.outputWidth || viewport.outputWidth || viewport.width;
+        const estH = viewport.mobile?.outputHeight || viewport.outputHeight || viewport.height;
         const largeFrame = Math.ceil(estW / 16) * Math.ceil(estH / 16) > 36864;
         if (largeFrame) mimeTypes.sort((a, b) => Number(/hvc1|hev1/.test(b)) - Number(/hvc1|hev1/.test(a)));
       }
@@ -157,13 +159,13 @@ export class PageRecorder {
       const landscape = width >= height;
       const maxWidth = landscape ? 4096 : 2304;
       const maxHeight = landscape ? 2304 : 4096;
-      const scale = !viewport.mobile && isH264 && width && height
+      const scale = !viewport.mobile && !viewport.outputWidth && isH264 && width && height
         ? Math.min(1, maxWidth / width, maxHeight / height)
         : 1;
       try {
         await track.applyConstraints({
           cursor: viewport.cursorVisible === false ? "never" : "always",
-          frameRate: { ideal: this.frameRate, max: this.frameRate },
+          frameRate: { min: this.frameRate, ideal: this.frameRate, max: this.frameRate },
           ...(scale < 1 ? {
             width: { ideal: Math.floor(width * scale) },
             height: { ideal: Math.floor(height * scale) },
@@ -178,6 +180,8 @@ export class PageRecorder {
       const prepared = await this.prepareVideo(this.sourceStream, this.mobileCrop, viewport);
       this.releaseVideo = prepared.release;
       this.requestVideoFrame = prepared.requestFrame;
+      this.updateVideoRegion = prepared.updateRegion;
+      this.videoStats = prepared.stats;
       this.stream = prepared.stream;
       const recordedTrack = this.stream.getVideoTracks()[0];
       if (!recordedTrack || recordedTrack.readyState === "ended") throw new Error("The recording video is unavailable.");
@@ -218,7 +222,7 @@ export class PageRecorder {
         const encoder = new this.MediaRecorderClass(this.stream, {
           videoBitsPerSecond: this.videoBitsPerSecond,
           mimeType,
-          videoKeyFrameIntervalDuration: 1000,
+          videoKeyFrameIntervalDuration: 2000,
         });
         if (encoder.mimeType && !/^video\/mp4(?:;|$)/i.test(encoder.mimeType)) throw new Error("This encoder did not select an MP4 container.");
         let failedBeforeData = false;
@@ -262,6 +266,7 @@ export class PageRecorder {
         }, { once: true });
         encoder.start(CHUNK_MS);
         this.recorder = encoder;
+        this.encodingMimeType = encoder.mimeType;
         this.requestVideoFrame?.();
         return;
       } catch (error) {
@@ -335,6 +340,9 @@ export class PageRecorder {
   releaseTracks() {
     clearTimeout(this.autoStopTimer);
     this.autoStopTimer = undefined;
+    this.lastVideoStats = this.videoStats?.() || this.lastVideoStats;
+    this.videoStats = undefined;
+    this.updateVideoRegion = undefined;
     const release = this.releaseVideo;
     this.releaseVideo = null;
     this.requestVideoFrame = null;

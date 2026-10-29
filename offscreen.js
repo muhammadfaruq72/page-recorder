@@ -5,14 +5,13 @@ import { prepareRecordingVideo, sourceCropRect } from "./cropped-video.js";
 let recordingContext = {};
 const withRecordingContext = status => ({ ...status, ...recordingContext });
 
-const keepAliveVideo = typeof document !== "undefined" ? document.createElement("video") : null;
-if (keepAliveVideo) {
-  keepAliveVideo.autoplay = true;
-  keepAliveVideo.muted = true;
-  keepAliveVideo.playsInline = true;
-  keepAliveVideo.style.display = "none";
-  document.body?.appendChild(keepAliveVideo);
-}
+// A playing raw MediaStream consumer keeps Chromium's capture scheduler at
+// media priority. This references captured frames; it does not decode a codec.
+const captureClock = document.createElement("video");
+captureClock.muted = true;
+captureClock.playsInline = true;
+captureClock.style.display = "none";
+document.body.append(captureClock);
 
 async function backgroundMessage(type, data = {}) {
   const response = await chrome.runtime.sendMessage({ target: "background", type, ...data });
@@ -35,28 +34,22 @@ const recorder = new PageRecorder({
     const sourceViewport = mobile
       ? { width: mobile.region.viewportWidth, height: mobile.region.viewportHeight, mobile }
       : viewport;
-    const isH264 = viewport.codec === "h264" || (viewport.codec !== "hevc" && !mobile);
-    const size = captureSize(sourceViewport, isH264);
+    const size = captureSize(sourceViewport);
     const frameRate = viewport.frameRate || FPS;
     try {
       await source.getVideoTracks()[0].applyConstraints({
-        width: { ideal: size.maxWidth, max: size.maxWidth }, height: { ideal: size.maxHeight, max: size.maxHeight },
-        frameRate: { ideal: frameRate, max: frameRate }, cursor: viewport.cursorVisible === false ? "never" : "always",
+        width: { exact: size.maxWidth }, height: { exact: size.maxHeight },
+        frameRate: { min: frameRate, ideal: frameRate, max: frameRate }, cursor: viewport.cursorVisible === false ? "never" : "always",
       });
     } catch (error) {
       console.warn("Using the available source resolution for recording:", error.message);
     }
-    if (keepAliveVideo && source) {
-      keepAliveVideo.srcObject = source;
-      keepAliveVideo.play().catch(() => {});
-    }
+    captureClock.srcObject = source;
+    await captureClock.play().catch(() => {});
     return prepareRecordingVideo(source, mobile, viewport, error => recorder.stop(error.message));
   },
   onStatus: status => {
-    if (["idle", "error"].includes(status.phase) && keepAliveVideo) {
-      keepAliveVideo.pause();
-      keepAliveVideo.srcObject = null;
-    }
+    if (["idle", "error"].includes(status.phase)) { captureClock.pause(); captureClock.srcObject = null; }
     return backgroundMessage("STATUS_CHANGED", { status: withRecordingContext(status) });
   },
   download: async (url, filename) => {
@@ -79,7 +72,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   let operation;
   switch (message.type) {
     case "STATUS":
-      sendResponse({ ok: true, status: withRecordingContext(recorder.status) });
+      sendResponse({ ok: true, status: withRecordingContext({ ...recorder.status, mimeType: recorder.encodingMimeType, performance: recorder.videoStats?.() || recorder.lastVideoStats }) });
       return;
     case "START":
       recordingContext = { tabId: message.tabId, sessionId: crypto.randomUUID(), cursorSessionId: message.cursorSessionId, cursorVisible: message.viewport?.cursorVisible !== false, exportScale: message.viewport?.exportScale, ...(message.mobileSessionId ? { mobileSessionId: message.mobileSessionId } : {}) };
@@ -96,6 +89,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       try { sourceCropRect(message.region, 1, 1); } catch { sendResponse({ ok: false }); return; }
       recorder.mobileCrop.region = message.region;
+      recorder.updateVideoRegion?.(message.region);
       sendResponse({ ok: true });
       return;
     case "STOP":
