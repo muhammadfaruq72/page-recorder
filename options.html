@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Page Recorder — Settings</title>
+    <link rel="icon" href="icons/record-32.png">
+    <link rel="stylesheet" href="options.css">
+    <script type="module" src="options.js"></script>
+  </head>
+  <body>
+    <main>
+      <div class="brand"><img src="icons/record-32.png" width="28" height="28" alt="">Page Recorder</div>
+      <section class="card" aria-labelledby="heading">
+        <span class="eyebrow">RECORDING WINDOW</span>
+        <h1 id="heading">Recording window width</h1>
+        <p class="intro">Desktop recordings use this width and the full available height of your display. Mobile mode keeps the current browser window size.</p>
+        <form id="width-form">
+          <fieldset id="fields" disabled>
+            <legend class="sr-only">Chrome window width in pixels</legend>
+            <label for="width">Width <span class="input-wrap"><input id="width" name="width" type="number" min="100" max="16384" step="1" inputmode="numeric" required aria-describedby="width-help"><span aria-hidden="true">px</span></span></label>
+            <div class="automatic-height"><span>Height</span><strong>Full available height · Automatic</strong></div>
+            <p class="help" id="width-help">The window fills the usable height above your taskbar or Dock. Its width includes Chrome’s frame; your video captures the webpage inside.</p>
+            <button type="submit">Save width</button>
+          </fieldset>
+          <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading saved width…</p>
+        </form>
+      </section>
+      <section class="card mobile-card" aria-labelledby="mobile-heading">
+        <span class="eyebrow">RECORD A MOBILE LAYOUT</span>
+        <h2 id="mobile-heading">Mobile mode</h2>
+        <p class="intro">Use a mobile viewport in the current tab, filling the available height while keeping its aspect ratio. Your browser window stays at its current size.</p>
+        <div class="switch-row">
+          <label for="mobile-enabled">Enable mobile mode<span class="switch-hint">Applies when the next recording starts.</span></label>
+          <input id="mobile-enabled" class="mode-switch" type="checkbox" role="switch" disabled>
+        </div>
+        <form id="mobile-form">
+          <fieldset id="mobile-fields" disabled>
+            <legend class="sr-only">Mobile viewport dimensions in pixels</legend>
+            <div class="scroll-dimensions">
+              <label for="mobile-width">Viewport width<span class="input-wrap"><input id="mobile-width" type="number" min="100" max="4096" step="1" required aria-describedby="mobile-help"><span aria-hidden="true">px</span></span></label>
+              <label for="mobile-height">Viewport height<span class="input-wrap"><input id="mobile-height" type="number" min="100" max="4096" step="1" required aria-describedby="mobile-help"><span aria-hidden="true">px</span></span></label>
+            </div>
+            <p class="help" id="mobile-help">These are the page’s viewport and saved video dimensions. The default 390 × 844 has the same aspect ratio as 1170 × 2532. The preview scales up or down to fill the available tab space without stretching. Surrounding space is excluded from the video.</p>
+            <button type="submit">Save mobile dimensions</button>
+          </fieldset>
+          <p id="mobile-status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading mobile settings…</p>
+        </form>
+        <p class="help mobile-note">Mobile mode uses the original page, including websites that block embedded views. It needs the browser’s debugger permission and may show a debugging banner. No Inspect window opens.</p>
+      </section>
+      <section class="card scroll-card" aria-labelledby="scroll-heading">
+        <span class="eyebrow">CONTROL EVERY MOVEMENT</span>
+        <h2 id="scroll-heading">Smooth scrolling</h2>
+        <p class="intro">Scroll down by your saved percentage or by one full viewport height. Each press makes one smooth step while recording.</p>
+        <div class="switch-row">
+          <label for="scroll-enabled">Enable scroll shortcuts<span class="switch-hint">The main switch applies immediately.</span></label>
+          <input id="scroll-enabled" class="mode-switch" type="checkbox" role="switch" disabled>
+        </div>
+        <form id="scroll-form">
+          <fieldset id="scroll-fields" disabled>
+            <legend class="sr-only">Smooth scrolling animation settings</legend>
+            <label for="scroll-easing">Animation transition
+              <select id="scroll-easing">
+                <option value="smootherstep">Extra smooth (recommended)</option>
+                <option value="ease-in-out-sine">Gentle ease in / out</option>
+                <option value="ease-out-cubic">Ease out</option>
+                <option value="linear">Constant speed</option>
+              </select>
+            </label>
+            <div class="scroll-dimensions">
+              <label for="scroll-duration">Animation duration<span class="input-wrap"><input id="scroll-duration" type="number" min="0.1" max="60" step="0.1" required aria-describedby="scroll-help"><span aria-hidden="true">seconds</span></span></label>
+              <label for="scroll-percent">Scroll distance<span class="input-wrap"><input id="scroll-percent" type="number" min="0.1" max="100" step="0.1" required aria-describedby="scroll-help"><span aria-hidden="true">%</span></span></label>
+            </div>
+            <p class="help" id="scroll-help">The percentage shortcut uses this distance. The full viewport shortcut always moves down by 100% of the visible webpage height. Both use the transition and duration above. Additional presses queue separate steps.</p>
+            <button id="scroll-save" type="submit">Save scrolling settings</button>
+          </fieldset>
+          <p id="scroll-status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading scrolling settings…</p>
+        </form>
+        <div class="shortcuts" aria-label="Keyboard shortcuts">
+          <div><span>Down · saved percentage</span><kbd id="shortcut-down">Loading…</kbd></div>
+          <div><span>Down · full viewport (100%)</span><kbd id="shortcut-full">Loading…</kbd></div>
+          <button id="change-shortcuts" class="secondary" type="button">Change shortcuts</button>
+          <p class="help">Shortcuts control the recorded tab while your browser is in front. In Arc, use In Arc scope and keep the webpage focused. Customize the keys if another application or extension uses them.</p>
+        </div>
+      </section>
+      <p class="footer">Keep using the toolbar icon to start and stop. Recordings hide the cursor. Mobile videos contain only the mobile viewport.</p>
+    </main>
+  </body>
+</html>

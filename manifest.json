@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "Page Recorder",
+  "version": "1.7.0",
+  "description": "Click once to record the current webpage. Click again to stop and save the video.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "activeTab",
+    "tabCapture",
+    "offscreen",
+    "downloads",
+    "unlimitedStorage",
+    "storage",
+    "system.display",
+    "scripting",
+    "debugger"
+  ],
+  "commands": {
+    "scroll-down": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+9",
+        "mac": "Command+Shift+9"
+      },
+      "description": "Scroll down by the saved viewport percentage while recording"
+    },
+    "scroll-up": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+8",
+        "mac": "Command+Shift+8"
+      },
+      "description": "Scroll down one full viewport height while recording"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Page Recorder \u2014 click to record this tab",
+    "default_icon": {
+      "16": "icons/record-16.png",
+      "32": "icons/record-32.png",
+      "48": "icons/record-48.png",
+      "128": "icons/record-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/record-16.png",
+    "32": "icons/record-32.png",
+    "48": "icons/record-48.png",
+    "128": "icons/record-128.png"
+  }
+}
