@@ -46,12 +46,19 @@ export function scrollPage(command) {
     }
   }
 
-  const savedStyles = ["scroll-behavior", "scroll-snap-type", "overflow-anchor"].map(property => ({
-    property, value: target.style.getPropertyValue(property), priority: target.style.getPropertyPriority(property),
-  }));
-  target.style.setProperty("scroll-behavior", "auto", "important");
-  target.style.setProperty("scroll-snap-type", "none", "important");
-  target.style.setProperty("overflow-anchor", "none", "important");
+  const elementsToStyle = [target];
+  if (target === root && doc.body && doc.body !== root && doc.body.style) {
+    elementsToStyle.push(doc.body);
+  }
+  const savedStyles = [];
+  for (const el of elementsToStyle) {
+    for (const property of ["scroll-behavior", "scroll-snap-type", "overflow-anchor"]) {
+      savedStyles.push({
+        el, property, value: el.style.getPropertyValue(property), priority: el.style.getPropertyPriority(property),
+      });
+      el.style.setProperty(property, property === "scroll-behavior" ? "auto" : "none", "important");
+    }
+  }
 
   let frameId = null;
   let cancelled = false;
@@ -61,9 +68,9 @@ export function scrollPage(command) {
     cancelled = true;
     if (frameId != null) cancelAnimationFrame(frameId);
     queue.length = 0;
-    for (const { property, value, priority } of savedStyles) {
-      if (value) target.style.setProperty(property, value, priority);
-      else target.style.removeProperty(property);
+    for (const { el, property, value, priority } of savedStyles) {
+      if (value) el.style.setProperty(property, value, priority);
+      else el.style.removeProperty(property);
     }
     view.removeEventListener("pagehide", cleanup);
     if (globalThis[key] === controller) delete globalThis[key];

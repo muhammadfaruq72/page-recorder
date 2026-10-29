@@ -16,8 +16,8 @@ export function sourceCropRect(region, videoWidth, videoHeight) {
 }
 
 export async function prepareRecordingVideo(source, mobile, viewport = {}, onError) {
-  if (!mobile && !viewport.outputWidth) return { stream: source };
-  const output = mobile || viewport;
+  if (!mobile) return { stream: source };
+  const output = mobile;
   const frameRate = viewport.frameRate || DEFAULT_OUTPUT_SETTINGS.frameRate;
   const frameInterval = 1000 / frameRate;
   const contentWidth = output.contentWidth || output.outputWidth || output.width;
@@ -28,7 +28,7 @@ export async function prepareRecordingVideo(source, mobile, viewport = {}, onErr
   const context = canvas.getContext("2d", { alpha: false, desynchronized: true });
   if (!context) throw new Error("The browser could not allocate this recording resolution. Use a smaller recording window.");
   context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
+  context.imageSmoothingQuality = "medium";
   // Content retains its exact scale. Any extra MP4 alignment edge stays black.
   context.fillStyle = "#000";
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -61,8 +61,8 @@ export async function prepareRecordingVideo(source, mobile, viewport = {}, onErr
       viewportWidth: viewport.width, viewportHeight: viewport.height,
     };
     const crop = sourceCropRect(region, width, height);
-    submitFrame();
     context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, contentWidth, contentHeight);
+    submitFrame();
   }
   function refreshFrame() {
     if (lastFrame) draw(lastFrame, lastFrame.displayWidth || lastFrame.codedWidth, lastFrame.displayHeight || lastFrame.codedHeight);
@@ -150,10 +150,6 @@ export async function prepareRecordingVideo(source, mobile, viewport = {}, onErr
             if (done) throw new Error("The captured video frame stream ended.");
             try {
               if (released || !nativeActive) continue;
-              const timestamp = Number.isFinite(frame.timestamp) ? frame.timestamp / 1000 : performance.now();
-              if (nextNativeFrameTime == null || timestamp < nextNativeFrameTime - frameInterval * 4) nextNativeFrameTime = timestamp;
-              if (timestamp + 0.5 < nextNativeFrameTime) continue;
-              nextNativeFrameTime += Math.max(1, Math.floor((timestamp - nextNativeFrameTime + 0.5) / frameInterval) + 1) * frameInterval;
               const cached = frame.clone();
               lastFrame?.close();
               lastFrame = cached;

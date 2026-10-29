@@ -5,13 +5,24 @@ export const BITRATE = 30_000_000;
 export const CHUNK_MS = 1_000;
 const MAX_PENDING_WRITE_BYTES = 64 * 1024 * 1024;
 // Every candidate uses a real MP4 muxer. Never silently fall back to WebM.
+// Prefer GPU hardware-accelerated profiles for Chromium / Arc on macOS & Windows.
 export const MIME_TYPES = [
-  "video/mp4;codecs=avc1.64003e",
   "video/mp4;codecs=avc1.640034",
+  "video/mp4;codecs=avc1.640033",
+  "video/mp4;codecs=avc1.64002a",
+  "video/mp4;codecs=avc1.4d402a",
   "video/mp4;codecs=avc1",
+  "video/mp4;codecs=hvc1.1.6.L156.B0",
+  "video/mp4;codecs=hvc1.1.6.L153.B0",
+  "video/mp4;codecs=hvc1.1.6.L123.B0",
+  "video/mp4;codecs=hvc1.1.6.L120.B0",
+  "video/mp4;codecs=hvc1.1.6.L93.B0",
   "video/mp4;codecs=hvc1.1.6.L186.B0",
   "video/mp4;codecs=hvc1",
+  "video/mp4;codecs=hev1.1.6.L156.B0",
   "video/mp4;codecs=hev1",
+  "video/mp4;codecs=vp09.00.10.08",
+  "video/mp4;codecs=av01.0.08M.08",
   "video/mp4",
 ];
 
@@ -38,9 +49,12 @@ export function captureSize({ width, height, devicePixelRatio = 1, mobile, outpu
     return { minWidth: captureWidth, maxWidth: captureWidth, minHeight: captureHeight, maxHeight: captureHeight };
   }
   if (outputWidth > 0 && outputHeight > 0) {
-    const scale = Math.min(Math.max(outputWidth / width, outputHeight / height), 8192 / width, 8192 / height);
-    const captureWidth = Math.min(8192, Math.max(2, Math.ceil(width * scale / 2) * 2));
-    const captureHeight = Math.min(8192, Math.max(2, Math.ceil(height * scale / 2) * 2));
+    const landscape = width >= height;
+    const maxBoundW = h264 ? (landscape ? 4096 : 2304) : 8192;
+    const maxBoundH = h264 ? (landscape ? 2304 : 4096) : 8192;
+    const scale = Math.min(Math.max(outputWidth / width, outputHeight / height), maxBoundW / width, maxBoundH / height);
+    const captureWidth = Math.min(maxBoundW, Math.max(2, Math.ceil(width * scale / 2) * 2));
+    const captureHeight = Math.min(maxBoundH, Math.max(2, Math.ceil(height * scale / 2) * 2));
     return { minWidth: captureWidth, maxWidth: captureWidth, minHeight: captureHeight, maxHeight: captureHeight };
   }
   const landscape = width >= height;
@@ -114,15 +128,22 @@ export class PageRecorder {
       if (!mimeTypes.length) throw new Error(this.codec === "auto"
         ? "This browser cannot record MP4. Update the browser to a version with MP4 recording support."
         : `The selected ${this.codec === "h264" ? "H.264" : "HEVC"} MP4 codec is unavailable. Choose Auto or another MP4 codec.`);
+      if (this.codec === "auto" && (viewport.outputWidth || viewport.width)) {
+        const estW = viewport.outputWidth || viewport.width;
+        const estH = viewport.outputHeight || viewport.height;
+        const largeFrame = Math.ceil(estW / 16) * Math.ceil(estH / 16) > 36864;
+        if (largeFrame) mimeTypes.sort((a, b) => Number(/hvc1|hev1/.test(b)) - Number(/hvc1|hev1/.test(a)));
+      }
       this.encoderCandidates = mimeTypes;
       const preferredType = mimeTypes[0];
+      const isH264 = /avc1|avc3/.test(preferredType);
       this.stream = await this.getMedia({
         audio: false,
         video: {
           mandatory: {
             chromeMediaSource: "tab",
             chromeMediaSourceId: streamId,
-            ...captureSize(viewport, preferredType.includes("avc1")),
+            ...captureSize(viewport, isH264),
             maxFrameRate: this.frameRate,
           },
         },
@@ -135,7 +156,7 @@ export class PageRecorder {
       const landscape = width >= height;
       const maxWidth = landscape ? 4096 : 2304;
       const maxHeight = landscape ? 2304 : 4096;
-      const scale = !viewport.mobile && !viewport.outputWidth && preferredType.includes("avc1") && width && height
+      const scale = !viewport.mobile && isH264 && width && height
         ? Math.min(1, maxWidth / width, maxHeight / height)
         : 1;
       try {

@@ -26,11 +26,12 @@ const recorder = new PageRecorder({
     const sourceViewport = mobile
       ? { width: mobile.region.viewportWidth, height: mobile.region.viewportHeight, mobile }
       : viewport;
-    const size = captureSize(sourceViewport);
+    const isH264 = viewport.codec === "h264" || (viewport.codec !== "hevc" && !mobile);
+    const size = captureSize(sourceViewport, isH264);
     const frameRate = viewport.frameRate || FPS;
     try {
       await source.getVideoTracks()[0].applyConstraints({
-        width: { exact: size.maxWidth }, height: { exact: size.maxHeight },
+        width: { ideal: size.maxWidth, max: size.maxWidth }, height: { ideal: size.maxHeight, max: size.maxHeight },
         frameRate: { ideal: frameRate, max: frameRate }, cursor: viewport.cursorVisible === false ? "never" : "always",
       });
     } catch (error) {

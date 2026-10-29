@@ -33,6 +33,7 @@
               <option value="30">30 FPS · Balanced</option>
               <option value="50">50 FPS</option>
               <option value="60" selected>60 FPS · Smooth scrolling (recommended)</option>
+              <option value="120">120 FPS · Ultra smooth (ProMotion / High refresh rate)</option>
             </select>
           </label>
           <p class="help" id="fps-help">Higher FPS captures more motion and needs more processing power. Actual frame rate depends on the page, browser, and hardware.</p>
@@ -61,7 +62,7 @@
                 <option value="hevc">H.265 / HEVC · Efficient high-resolution video</option>
               </select>
             </label>
-            <p class="help" id="codec-help">Auto can use H.264 or HEVC. Selecting a specific codec requires browser and hardware support. Every option saves MP4.</p>
+            <p class="help" id="codec-help">Auto selects the fastest hardware-accelerated GPU encoder for Chrome and Arc (H.264 / HEVC). Selecting a specific codec requires browser and hardware support. Every option saves MP4.</p>
             <div class="scroll-dimensions">
               <label for="output-start-delay">Start delay
                 <span class="input-wrap"><input id="output-start-delay" type="number" min="0" max="60" step="0.1" value="0" aria-describedby="timing-help"><span aria-hidden="true">seconds</span></span>

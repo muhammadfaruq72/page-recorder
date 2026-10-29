@@ -3,7 +3,7 @@ export const LEGACY_WINDOW_SIZE_KEY = "recordingWindowSize";
 export const SCROLL_SETTINGS_KEY = "smoothScrollSettings";
 export const MOBILE_SETTINGS_KEY = "mobileViewportSettings";
 export const OUTPUT_SETTINGS_KEY = "recordingOutputSettings";
-export const RECORDING_FRAME_RATES = Object.freeze([15, 24, 25, 30, 50, 60]);
+export const RECORDING_FRAME_RATES = Object.freeze([15, 24, 25, 30, 50, 60, 120]);
 export const DEFAULT_OUTPUT_SETTINGS = Object.freeze({
   exportScale: 3, cursorVisible: true, frameRate: 60,
   bitrateMode: "auto", bitrateMbps: 30, codec: "auto",

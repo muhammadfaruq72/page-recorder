@@ -20,9 +20,7 @@ self.onmessage = ({ data }) => {
           offset += written;
           position += written;
         }
-        // Commit each one-second chunk before acknowledging it. This blocking
-        // operation runs here, away from capture, encoding, and page scrolling.
-        await access.flush();
+        // Write the chunk to the file. Sync flush is performed when recording finishes.
       } else if (data.type === "FINISH") {
         if (!access) throw new Error("The recording file is closed.");
         await access.flush();
