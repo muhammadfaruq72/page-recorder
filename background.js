@@ -1,3 +1,4 @@
+import { COLLECT_POINTS_KEY, SCROLL_POINTS_KEY, scrollPointsPageKey } from "./settings.js";
 import { prepareRecordingWindow } from "./window-size.js";
 import { loadScrollSettings, SCROLL_SETTINGS_KEY, loadMobileSettings, loadOutputSettings, scaledOutputSize, DEFAULT_OUTPUT_SETTINGS } from "./settings.js";
 import { scrollPage } from "./smooth-scroll.js";
@@ -68,6 +69,58 @@ async function stopMobileRecording(tabId, mobileSessionId, error) {
   await recorderMessage("STOP", { error });
 }
 
+// Collection is independent of the recording shortcuts and never captures video.
+let pointWrites = Promise.resolve();
+let pointSteps = Promise.resolve();
+function changePoints(operation) {
+  const next = pointWrites.catch(() => {}).then(operation);
+  pointWrites = next;
+  return next;
+}
+async function syncPointCollectors() {
+  if (!(await chrome.storage.local.get(COLLECT_POINTS_KEY))[COLLECT_POINTS_KEY]) return;
+  const permission = await chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] });
+  if (!permission) return;
+  const tabs = await chrome.tabs.query({});
+  await Promise.allSettled(tabs.filter(tab => /^https?:/.test(tab.url || "")).map(tab =>
+    chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["scroll-point-collector.js"], injectImmediately: true })));
+}
+async function suspendPointCollection(suspended, tabId) {
+  await chrome.storage.session.set({ pointCollectionSuspended: suspended });
+  // Other tabs may be loading or suspended indefinitely. They must never
+  // hold up capture or saving. Hide the recorded tab's button synchronously.
+  if (suspended && Number.isInteger(tabId) && (await chrome.storage.local.get(COLLECT_POINTS_KEY))[COLLECT_POINTS_KEY]) {
+    await chrome.scripting.executeScript({
+      target: { tabId }, injectImmediately: true,
+      func: () => { globalThis.__pageRecorderPointCollector?.remove(); },
+    });
+  }
+  void syncPointCollectors().catch(error => console.debug("Scroll point collection:", error.message));
+}
+function scrollNextPoint(status, settings) {
+  const next = pointSteps.catch(() => {}).then(async () => {
+    const tab = await chrome.tabs.get(status.tabId);
+    const url = scrollPointsPageKey(tab.url);
+    let { scrollPointSequence: sequence } = await chrome.storage.session.get("scrollPointSequence");
+    if (sequence?.sessionId !== status.sessionId || sequence.url !== url) {
+      const saved = await chrome.storage.local.get(SCROLL_POINTS_KEY);
+      sequence = { sessionId: status.sessionId, url, index: 0, points: saved[SCROLL_POINTS_KEY]?.[url] || [] };
+    }
+    if (sequence.index >= sequence.points.length) return;
+    // Recheck after queued key presses so stopping cannot restart an animation.
+    const current = (await recorderMessage("STATUS")).status;
+    if (current.phase !== "recording" || current.sessionId !== status.sessionId) return;
+    await chrome.scripting.executeScript({
+      target: { tabId: status.tabId }, func: scrollPage,
+      args: [{ action: "point", top: sequence.points[sequence.index], settings, sessionId: status.sessionId }],
+    });
+    sequence.index++;
+    await chrome.storage.session.set({ scrollPointSequence: sequence });
+  });
+  pointSteps = next;
+  return next;
+}
+
 async function syncRecordedShortcuts(status) {
   if (!Number.isInteger(status.tabId) || !status.sessionId) return;
   const settings = await loadScrollSettings();
@@ -76,9 +129,9 @@ async function syncRecordedShortcuts(status) {
       target: { tabId: status.tabId },
       func: recordingShortcuts,
       args: [{
-        action: status.phase === "recording" && settings.enabled ? "install" : "remove",
+        action: status.phase === "recording" ? "install" : "remove",
         sessionId: status.sessionId,
-        commands: await chrome.commands.getAll(),
+        commands: (await chrome.commands.getAll()).filter(command => settings.enabled || command.name === "scroll-next-point"),
       }],
     });
   } catch (error) {
@@ -151,10 +204,10 @@ async function cancelRecordedScroll(status) {
 
 export async function handleScrollCommand(command, input = {}) {
   const pageKey = input.source === "page" ? input : undefined;
-  if (!["scroll-down", "scroll-up"].includes(command)) return;
+  if (!["scroll-down", "scroll-up", "scroll-next-point"].includes(command)) return;
   if (!pageKey && !(await chrome.windows.getLastFocused()).focused) return;
   const settings = await loadScrollSettings();
-  if (!settings.enabled || !await hasRecorderDocument()) return;
+  if ((!settings.enabled && command !== "scroll-next-point") || !await hasRecorderDocument()) return;
   const { status } = await recorderMessage("STATUS");
   if (status.phase !== "recording" || !status.sessionId) return;
   if (pageKey && (pageKey.tabId !== status.tabId || pageKey.sessionId !== status.sessionId)) return;
@@ -166,6 +219,7 @@ export async function handleScrollCommand(command, input = {}) {
   const duplicate = recentScrollKeys.findIndex(key => key.command === command && key.sessionId === status.sessionId && key.source !== source);
   if (duplicate !== -1) { recentScrollKeys.splice(duplicate, 1); return; }
   recentScrollKeys.push({ command, sessionId: status.sessionId, source, time: now });
+  if (command === "scroll-next-point") return scrollNextPoint(status, settings);
   // Keep the old second-command ID so existing shortcut assignments survive.
   // Both shortcuts now move down; the second always uses a full viewport.
   const stepSettings = command === "scroll-up" ? { ...settings, stepPercent: 100 } : settings;
@@ -182,6 +236,7 @@ chrome.commands.onCommand.addListener(command => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes[COLLECT_POINTS_KEY]) void syncPointCollectors().catch(error => console.debug("Scroll point collection:", error.message));
   if (area !== "local" || !changes[SCROLL_SETTINGS_KEY]) return;
   return (async () => {
     if (!await hasRecorderDocument()) return;
@@ -192,6 +247,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.status === "complete") {
+    void (async () => {
+      if (!(await chrome.storage.local.get(COLLECT_POINTS_KEY))[COLLECT_POINTS_KEY]) return;
+      if (!await chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] })) return;
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["scroll-point-collector.js"], injectImmediately: true });
+    })().catch(() => {});
+  }
   if (change.status === "complete") return queueRecordingUpdate(() => refreshRecordedShortcuts(tabId)).catch(error => console.debug("Page shortcuts:", error.message));
 });
 chrome.tabs.onActivated.addListener(({ tabId }) => {
@@ -279,6 +341,7 @@ export async function toggleRecording(tab) {
   const cursorSessionId = output.cursorVisible ? undefined : crypto.randomUUID();
   const mobileSessionId = mobile.enabled ? crypto.randomUUID() : undefined;
   try {
+    await suspendPointCollection(true, tab.id);
     let viewport;
     if (mobile.enabled) {
       viewport = await startMobileViewport(tab, { ...mobile, exportScale: output.exportScale }, mobileSessionId);
@@ -295,6 +358,7 @@ export async function toggleRecording(tab) {
   } catch (error) {
     await restoreRecordingCursor({ tabId: tab.id, cursorSessionId });
     await closeMobileViewport({ tabId: tab.id, mobileSessionId });
+    await suspendPointCollection(false);
     throw error;
   }
 }
@@ -314,6 +378,34 @@ chrome.action.onClicked.addListener(tab => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || message?.target !== "background") return;
+  if (message.type === "POINT_COLLECTION_STATE") {
+    chrome.storage.session.get("pointCollectionSuspended").then(state => sendResponse({ ok: true, suspended: !!state.pointCollectionSuspended }));
+    return true;
+  }
+  if (message.type === "COLLECT_POINT") {
+    if (!Number.isInteger(sender.tab?.id) || sender.frameId !== 0 || !/^https?:/.test(sender.url || "")) return;
+    changePoints(async () => {
+      const saved = await chrome.storage.local.get([COLLECT_POINTS_KEY, SCROLL_POINTS_KEY]);
+      const session = await chrome.storage.session.get("pointCollectionSuspended");
+      if (!saved[COLLECT_POINTS_KEY] || session.pointCollectionSuspended) throw new Error("Collect points before recording starts.");
+      if (!Number.isSafeInteger(message.top) || message.top < 0) throw new Error("Invalid scroll position.");
+      const url = scrollPointsPageKey(sender.url);
+      const pages = saved[SCROLL_POINTS_KEY] || {};
+      const points = pages[url] || [];
+      if (points.at(-1) !== message.top) points.push(message.top);
+      pages[url] = points;
+      await chrome.storage.local.set({ [SCROLL_POINTS_KEY]: pages });
+      return { count: points.length };
+    }).then(result => sendResponse({ ok: true, ...result }), error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "CLEAR_SCROLL_POINTS" && sender.url === chrome.runtime.getURL("options.html")) {
+    changePoints(async () => {
+      await chrome.storage.local.set({ [SCROLL_POINTS_KEY]: {} });
+      await chrome.storage.session.remove("scrollPointSequence");
+    }).then(() => sendResponse({ ok: true }), error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message.type === "SCROLL_KEY") {
     if (!Number.isInteger(sender.tab?.id) || sender.frameId !== 0) return;
     handleScrollCommand(message.command, { source: "page", tabId: sender.tab.id, sessionId: message.sessionId }).then(
@@ -337,6 +429,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await closeMobileViewport(status);
         await restoreRecordingCursor(status);
       }
+      if (["idle", "error"].includes(status.phase)) await suspendPointCollection(false);
       await updateAction(status);
       return {};
     });
@@ -407,6 +500,7 @@ async function restoreAction() {
       const session = await mobileViewportSession();
       if (session) await closeMobileViewport({ tabId: session.tabId, mobileSessionId: session.sessionId });
     }
+    await suspendPointCollection(["recording", "starting", "saving"].includes(status.phase));
     await updateAction(status);
   } catch (error) {
     console.error("Could not restore recorder status:", error);

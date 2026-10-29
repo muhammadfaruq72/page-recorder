@@ -153,3 +153,11 @@ export function scaledOutputSize(width, height, exportScale) {
   return { outputWidth: Math.ceil(outputWidth / 2) * 2, outputHeight: Math.ceil(outputHeight / 2) * 2,
     contentWidth: outputWidth, contentHeight: outputHeight };
 }
+
+export const COLLECT_POINTS_KEY = "collectScrollPoints";
+export const SCROLL_POINTS_KEY = "scrollPoints";
+export function scrollPointsPageKey(url) {
+  const page = new URL(url);
+  page.hash = "";
+  return page.href;
+}

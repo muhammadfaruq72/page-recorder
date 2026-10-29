@@ -79,6 +79,7 @@
           </details>
         </fieldset>
         <p id="output-status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading output settings…</p>
+        <p id="recorder-status" class="status" role="status" aria-live="polite">Reading recorder status…</p>
       </section>
       <section class="card window-card" aria-labelledby="heading">
         <span class="eyebrow">RECORDING WINDOW</span>
@@ -120,6 +121,20 @@
         </form>
         <p class="help mobile-note">Mobile mode uses the original page, including websites that block embedded views. It needs the browser’s debugger permission and may show a debugging banner. No Inspect window opens.</p>
       </section>
+      <section class="card scroll-card" aria-labelledby="points-heading">
+        <span class="eyebrow">PLAN YOUR RECORDING</span>
+        <h2 id="points-heading">Scroll points</h2>
+        <p class="intro">Collect page positions before recording. During recording, press the next-point shortcut once for each saved position.</p>
+        <div class="switch-row">
+          <label for="points-collect">Collect scroll points<span class="switch-hint">Shows a Save scroll point button on websites. Hidden during recording.</span></label>
+          <input id="points-collect" class="mode-switch" type="checkbox" role="switch" disabled>
+        </div>
+        <p class="help">Turn on collection, open your webpage, scroll to a position, and click Save scroll point. Repeat in the order you want to visit them. Points are saved separately for each page URL. They use the document’s vertical scroll position in pixels; collect at the layout you plan to record.</p>
+        <div id="points-list" class="points-list" aria-label="Saved scroll points"></div>
+        <button id="points-clear" class="secondary" type="button" disabled>Clear all points</button>
+        <p class="help">The next-point shortcut uses your saved scrolling transition and duration, even when percentage/full-viewport shortcuts are off. Each recording starts at the first point. After the last point, additional presses do nothing. Collection supports HTTP and HTTPS websites.</p>
+        <p id="points-status" class="status" role="status" aria-live="polite">Loading scroll points…</p>
+      </section>
       <section class="card scroll-card" aria-labelledby="scroll-heading">
         <span class="eyebrow">CONTROL EVERY MOVEMENT</span>
         <h2 id="scroll-heading">Smooth scrolling</h2>
@@ -151,6 +166,7 @@
         <div class="shortcuts" aria-label="Keyboard shortcuts">
           <div><span>Down · saved percentage</span><kbd id="shortcut-down">Loading…</kbd></div>
           <div><span>Down · full viewport (100%)</span><kbd id="shortcut-full">Loading…</kbd></div>
+          <div><span>Next saved scroll point</span><kbd id="shortcut-point">Loading…</kbd></div>
           <button id="change-shortcuts" class="secondary" type="button">Change shortcuts</button>
           <p class="help">Shortcuts control the recorded tab while your browser is in front. In Arc, use In Arc scope and keep the webpage focused. Customize the keys if another application or extension uses them.</p>
         </div>

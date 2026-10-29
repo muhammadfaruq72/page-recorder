@@ -76,7 +76,7 @@ test("start requests only tab video at the supplied quality and publishes record
   assert.equal(h.recorder.recorder.options.videoBitsPerSecond, BITRATE);
   assert.equal(h.recorder.recorder.timeslice, CHUNK_MS);
   assert.equal(h.track.constraints.frameRate.ideal, 60);
-  assert.equal(h.track.constraints.cursor, "never");
+  assert.equal(h.track.constraints.cursor, "always");
   assert.equal(h.recorder.status.phase, "recording");
   assert.equal(h.recorder.status.tabId, 12);
 });
@@ -241,12 +241,12 @@ test("an asynchronous encoder failure before any data automatically tries the ne
   failedEncoder.dispatchEvent(event);
   failedEncoder.dispatchEvent(new Event("stop"));
   assert.notEqual(h.recorder.recorder, failedEncoder);
-  assert.equal(h.recorder.recorder.mimeType, "video/webm");
+  assert.match(h.recorder.recorder.mimeType, /^video\/mp4/);
   assert.equal(h.track.readyState, "live");
   assert.equal(h.recorder.status.phase, "recording");
   h.recorder.stop();
   await waitFor(() => h.recorder.status.phase === "idle");
-  assert.match(h.downloads[0].filename, /\.webm$/);
+  assert.match(h.downloads[0].filename, /\.mp4$/);
 });
 
 test("H.264 capture is constrained proportionally for landscape and portrait", async () => {
@@ -280,8 +280,8 @@ test("a second recording works after the first download completes", async () => 
 
 test("filename extensions reflect the actual recording container", () => {
   assert.equal(videoExtension("video/mp4;codecs=avc1"), "mp4");
-  assert.equal(videoExtension("video/x-matroska;codecs=avc1"), "mkv");
-  assert.equal(videoExtension("video/webm;codecs=vp8"), "webm");
+  assert.throws(() => videoExtension("video/x-matroska;codecs=avc1"), /MP4/);
+  assert.throws(() => videoExtension("video/webm;codecs=vp8"), /MP4/);
   assert.equal(recordingFilename("video/mp4", new Date("2026-10-27T10:15:20.100Z")), "Page Recorder/recording-2026-10-27T10-15-20-100Z.mp4");
 });
 
@@ -290,4 +290,17 @@ test("capture dimensions preserve the viewport ratio and fit hardware bounds", (
   assert.deepEqual(captureSize({ width: 3840, height: 2160, devicePixelRatio: 2 }, true), { maxWidth: 4096, maxHeight: 2304 });
   assert.deepEqual(captureSize({ width: 2160, height: 3840, devicePixelRatio: 2 }, true), { maxWidth: 2304, maxHeight: 4096 });
   assert.deepEqual(captureSize({}), {});
+});
+
+test("MP4 recording works when Arc requires a fully specified HEVC codec", async () => {
+  const h = setup();
+  h.FakeMediaRecorder.isTypeSupported = type => type === "video/mp4;codecs=hvc1.1.6.L186.B0";
+  h.track.getSettings = () => ({ width: 3580, height: 2880, frameRate: 60 });
+  await h.recorder.start("stream", 1, { outputWidth: 3580, outputHeight: 2880 });
+  assert.equal(h.recorder.recorder.mimeType, "video/mp4;codecs=hvc1.1.6.L186.B0");
+  assert.equal(h.recorder.status.settings.width, 3580);
+  assert.equal(h.recorder.status.phase, "recording");
+  h.recorder.stop();
+  await waitFor(() => h.recorder.status.phase === "idle");
+  assert.match(h.downloads[0].filename, /\.mp4$/);
 });

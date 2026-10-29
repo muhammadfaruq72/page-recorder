@@ -6,7 +6,10 @@ export const CHUNK_MS = 1_000;
 const MAX_PENDING_WRITE_BYTES = 64 * 1024 * 1024;
 // Every candidate uses a real MP4 muxer. Never silently fall back to WebM.
 export const MIME_TYPES = [
+  "video/mp4;codecs=avc1.64003e",
+  "video/mp4;codecs=avc1.640034",
   "video/mp4;codecs=avc1",
+  "video/mp4;codecs=hvc1.1.6.L186.B0",
   "video/mp4;codecs=hvc1",
   "video/mp4;codecs=hev1",
   "video/mp4",
@@ -77,7 +80,7 @@ export class PageRecorder {
   }
 
   publish(phase, extra = {}) {
-    this.status = { phase, ...extra };
+    this.status = { phase, ...(this.encodingSize ? { settings: this.encodingSize } : {}), ...extra };
     const status = this.status;
     // A sleeping/restarting service worker must never stop the video stream.
     Promise.resolve().then(() => this.onStatus(status)).catch(console.error);
@@ -98,6 +101,7 @@ export class PageRecorder {
     this.stopReason = null;
     this.videoBitsPerSecond = BITRATE;
     clearTimeout(this.autoStopTimer);
+    this.encodingSize = undefined;
     this.autoStopTimer = undefined;
     const options = { ...DEFAULT_OUTPUT_SETTINGS, ...viewport };
     this.frameRate = options.frameRate;
@@ -156,6 +160,7 @@ export class PageRecorder {
       const recordedTrack = this.stream.getVideoTracks()[0];
       if (!recordedTrack || recordedTrack.readyState === "ended") throw new Error("The recording video is unavailable.");
       const recordedSize = recordedTrack.getSettings();
+      this.encodingSize = recordedSize;
       if (viewport.outputWidth || viewport.mobile?.outputWidth) {
         // Prefer platform HEVC for frames beyond the usual H.264 Level 5.x
         // macroblock budget, retaining H.264 and generic MP4 as alternatives.

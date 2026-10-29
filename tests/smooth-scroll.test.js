@@ -44,6 +44,7 @@ function setup({ root = element(), panels = [] } = {}) {
     step(direction = 1, settings = DEFAULT_SCROLL_SETTINGS, sessionId = "one") {
       return invoke({ action: "step", direction, settings, sessionId });
     },
+    point(top) { return invoke({ action: "point", top, settings: DEFAULT_SCROLL_SETTINGS, sessionId: "one" }); },
     cancel(sessionId = "one") { return invoke({ action: "cancel", sessionId }); },
     advance(milliseconds, interval = 1000 / 60) {
       const end = time + milliseconds;
@@ -189,4 +190,20 @@ test("scrolling settings default to disabled, 30%, 1.5 seconds, and extra smooth
   for (const invalid of [{ easing: "bounce" }, { durationMs: 0 }, { durationMs: NaN }, { stepPercent: 101 }, { stepPercent: 0 }, { enabled: "true" }]) {
     await assert.rejects(saveScrollSettings({ ...DEFAULT_SCROLL_SETTINGS, ...invalid }));
   }
+});
+
+test("absolute scroll points animate in collection order and clamp to document bounds", () => {
+  const h = setup();
+  h.point(940);
+  h.point(1800);
+  h.advance(750);
+  assert.ok(h.root.scrollTop > 0 && h.root.scrollTop < 940);
+  h.advance(2300);
+  assert.ok(Math.abs(h.root.scrollTop - 1800) < .001);
+  h.point(99999);
+  h.advance(1600);
+  assert.ok(Math.abs(h.root.scrollTop - 2400) < .001);
+  h.point(400);
+  h.advance(1600);
+  assert.ok(Math.abs(h.root.scrollTop - 400) < .001);
 });

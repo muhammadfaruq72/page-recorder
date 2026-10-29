@@ -18,7 +18,7 @@ export function recordingShortcuts(config) {
     }
     return binding;
   }
-  const bindings = config.commands.filter(command => command.shortcut && ["scroll-down", "scroll-up"].includes(command.name))
+  const bindings = config.commands.filter(command => command.shortcut && ["scroll-down", "scroll-up", "scroll-next-point"].includes(command.name))
     .map(command => ({ command: command.name, ...parse(command.shortcut) }));
   function matches(event, binding) {
     if (["ctrlKey", "metaKey", "altKey", "shiftKey"].some(modifier => event[modifier] !== binding[modifier])) return false;

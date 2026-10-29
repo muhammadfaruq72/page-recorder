@@ -63,6 +63,16 @@ Both scrolling shortcuts work on the mobile viewport. With a height of 844 px, a
 
 This is a responsive mobile viewport with touch input capabilities, rather than a simulation of a particular phone’s operating system; it retains the browser’s user agent. Same-origin navigation is supported. Navigating to another origin ends the active-tab permission used for keyboard handling, so the recorder stops and saves; start a new recording on that destination. Protected browser pages and protected video content remain subject to the browser’s capture restrictions.
 
+## Saved scroll points
+
+In **Options → Scroll points**, enable **Collect scroll points** and allow the optional website-access request. This permission lets the extension show a small **Save scroll point** button on HTTP/HTTPS webpages. Open your webpage, scroll manually to a position, and click the button. Repeat for each position you want to visit. The options page lists saved positions in pixels, grouped by page URL; **Clear all points** removes every saved position. Turning collection off keeps your list.
+
+Start recording with the usual toolbar button. The collection button disappears before capture starts. Press **Command + Shift + 7** on Mac or **Ctrl + Shift + 7** on Windows/Linux to move to the next point, using your saved scrolling transition and duration. Customize this third shortcut with **Change shortcuts**; Arc uses the same page-key fallback as the existing shortcuts. No scrolling happens until you press a key. Each recording begins with the first point; additional presses queue points in collection order. After the final point, presses do nothing. The next-point shortcut works even when the percentage/full-viewport scrolling switch is off.
+
+Points store the document/body’s vertical scroll offset, rather than positions inside nested scrolling panels. Positions are scoped to the full page URL excluding its fragment, so different pages keep separate lists. Capture them at the page layout you intend to record: responsive layouts, expanded content, and lazy loading can change where a pixel offset lands. A position beyond the current page bottom is clamped to the available height. Point lists are read on the first next-point press of each recording (and after navigating to another page).
+
+Collection stays hidden while recording and saving, and returns afterward if its switch is still on. The original percentage and full-viewport shortcuts remain available. All points stay in local extension storage.
+
 ## Smooth scrolling with keyboard shortcuts
 
 The **Smooth scrolling** section in **Options** controls scrolling. Turn on **Enable scroll shortcuts**; the main switch takes effect immediately. Set the animation transition, duration, and scroll distance, then click **Save scrolling settings**. Saved animation settings apply to the next shortcut press, including during an existing recording.
@@ -128,6 +138,7 @@ Everything stays on your computer. There are no uploads, analytics, external dep
 | `storage` | Remember your recording window's width and scrolling preferences locally. |
 | `system.display` | Read the current display's usable height and position the window within it. |
 | `scripting` | Animate scrolling and apply the cursor visibility choice in the recorded tab. Uses the `activeTab` grant. |
+| Optional HTTP/HTTPS website access | Show the scroll-point collection button when you enable collection. Requested separately; recording does not require it. |
 | `debugger` | Apply native mobile viewport and touch emulation to the selected tab, then restore and detach on stop. Required by the browser for mobile mode. |
 
 ## Development

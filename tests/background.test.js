@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_SCROLL_SETTINGS, SCROLL_SETTINGS_KEY, MOBILE_SETTINGS_KEY } from "../settings.js";
+import { DEFAULT_SCROLL_SETTINGS, SCROLL_SETTINGS_KEY, MOBILE_SETTINGS_KEY, DEFAULT_OUTPUT_SETTINGS, OUTPUT_SETTINGS_KEY, scaledOutputSize, COLLECT_POINTS_KEY, SCROLL_POINTS_KEY } from "../settings.js";
 
 let moduleNumber = 0;
 async function setup(status = { phase: "idle" }, exists = false, savedWidth = null) {
@@ -31,6 +31,7 @@ async function setup(status = { phase: "idle" }, exists = false, savedWidth = nu
       onClicked: event("click"),
       ...Object.fromEntries(["setIcon", "setTitle", "setBadgeText", "setBadgeBackgroundColor", "setBadgeTextColor"].map(name => [name, async value => { actions[name] = value; }])),
     },
+    permissions: { contains: async () => false },
     commands: { onCommand: event("command"), getAll: async () => [{ name: "scroll-down", shortcut: "⌃⌘Z" }] },
     scripting: {
       executeScript: async options => { calls.push({ type: "SCRIPT", ...options }); return [{ result: { running: true } }]; },
@@ -60,7 +61,7 @@ async function setup(status = { phase: "idle" }, exists = false, savedWidth = nu
       get: async windowId => { calls.push({ type: "WINDOW_GET", windowId }); return { ...window }; },
       update: async (windowId, changes) => { calls.push({ type: "WINDOW_UPDATE", windowId, ...changes }); Object.assign(window, changes); return { ...window }; },
     },
-    tabs: { onUpdated: event("tabUpdated"), onActivated: event("tabActivated"), get: async tabId => {
+    tabs: { query: async () => [], onUpdated: event("tabUpdated"), onActivated: event("tabActivated"), get: async tabId => {
       calls.push({ type: "TAB_GET", tabId });
       return { id: tabId, windowId: 9, width: window.width - 16, height: window.height - 100 };
     } },
@@ -75,13 +76,10 @@ test("toolbar click captures the clicked tab without a popup", async () => {
   assert.equal(h.calls.filter(call => call.type === "CREATE").length, 1);
   assert.deepEqual(h.calls.find(call => call.type === "CAPTURE"), { type: "CAPTURE", targetTabId: 42 });
   const { cursorSessionId, ...start } = h.calls.find(call => call.type === "START");
-  assert.equal(typeof cursorSessionId, "string");
-  assert.deepEqual(start, { target: "recorder", type: "START", streamId: "stream-id", tabId: 42, viewport: { width: 1100, height: 932 } });
-  const cursor = h.calls.find(call => call.type === "CSS_INSERT");
-  assert.equal(cursor.origin, "USER");
-  assert.deepEqual(cursor.target, { tabId: 42, allFrames: true });
-  assert.match(cursor.css, /cursor: none !important/);
-  assert.ok(h.calls.indexOf(cursor) < h.calls.findIndex(call => call.type === "CAPTURE"));
+  assert.equal(cursorSessionId, undefined);
+  assert.deepEqual(start, { target: "recorder", type: "START", streamId: "stream-id", tabId: 42,
+    viewport: { width: 1100, height: 932, ...scaledOutputSize(1100, 932, 3), ...DEFAULT_OUTPUT_SETTINGS } });
+  assert.equal(h.calls.some(call => call.type === "CSS_INSERT"), false);
 });
 
 test("clicking from another tab stops the existing recording", async () => {
@@ -156,7 +154,7 @@ test("saved width and automatic height are applied before capture and the resize
   const capture = h.calls.findIndex(call => call.type === "CAPTURE");
   assert.ok(resize >= 0 && capture > resize);
   assert.deepEqual(h.calls[resize], { type: "WINDOW_UPDATE", windowId: 9, width: 960, height: 1032, top: 24, left: 100 });
-  assert.deepEqual(h.calls.find(call => call.type === "START").viewport, { width: 944, height: 932 });
+  assert.deepEqual(h.calls.find(call => call.type === "START").viewport, { width: 944, height: 932, ...scaledOutputSize(944, 932, 3), ...DEFAULT_OUTPUT_SETTINGS });
   assert.equal(h.preferences.recordingWindowWidth, 960);
 });
 
@@ -178,7 +176,7 @@ test("mobile mode emulates the original tab before capture without resizing its 
   assert.equal(start.viewport.height, 760);
   assert.equal(start.mobileSessionId, h.sessionStorage.nativeMobileViewport.sessionId);
   const metrics = h.calls.find(call => call.method === "Emulation.setDeviceMetricsOverride");
-  assert.deepEqual(metrics.params, { width: 390, height: 844, deviceScaleFactor: 0, mobile: true, screenWidth: 390, screenHeight: 844, scale: 760 / 844, dontSetVisibleSize: true });
+  assert.deepEqual(metrics.params, { width: 390, height: 844, deviceScaleFactor: 3, mobile: true, screenWidth: 390, screenHeight: 844, scale: 760 / 844, dontSetVisibleSize: true });
   assert.ok(h.calls.indexOf(metrics) < h.calls.findIndex(call => call.type === "CAPTURE"));
   assert.equal(h.calls.some(call => call.type === "WINDOW_UPDATE"), false);
   assert.equal(h.calls.some(call => call.type === "SCRIPT"), false);
@@ -186,6 +184,7 @@ test("mobile mode emulates the original tab before capture without resizing its 
 
 test("mobile capture failure restores native emulation and the cursor", async () => {
   const h = await setup();
+  h.preferences[OUTPUT_SETTINGS_KEY] = { ...DEFAULT_OUTPUT_SETTINGS, cursorVisible: false };
   h.preferences[MOBILE_SETTINGS_KEY] = { enabled: true, width: 390, height: 844 };
   chrome.tabCapture.getMediaStreamId = async () => { throw new Error("Capture denied"); };
   await assert.rejects(h.toggleRecording({ id: 42, windowId: 9, url: "https://example.com" }), /Capture denied/);
@@ -219,7 +218,11 @@ test("a rejected mobile metrics command rolls back and does not start capture", 
 test("failure to persist an attached mobile session still releases the debugger", async () => {
   const h = await setup();
   h.preferences[MOBILE_SETTINGS_KEY] = { enabled: true, width: 390, height: 844 };
-  chrome.storage.session.set = async () => { throw new Error("Storage unavailable"); };
+  const setSession = chrome.storage.session.set;
+  chrome.storage.session.set = async values => {
+    if (values.nativeMobileViewport) throw new Error("Storage unavailable");
+    return setSession(values);
+  };
   await assert.rejects(h.toggleRecording({ id: 42, windowId: 9, url: "https://example.com" }), /Storage unavailable/);
   assert.ok(h.calls.some(call => call.type === "DEBUG_DETACH"));
   assert.equal(h.calls.some(call => call.type === "CAPTURE"), false);
@@ -339,4 +342,35 @@ test("Chrome's own stop-sharing status also cancels a pending animation", async 
     assert.equal(retained, true);
   });
   assert.equal(h.calls.find(call => call.type === "SCRIPT").args[0].action, "cancel");
+});
+
+test("collecting points never lets an unrelated loading tab block recording", async () => {
+  const h = await setup();
+  h.preferences[COLLECT_POINTS_KEY] = true;
+  chrome.permissions.contains = async () => true;
+  chrome.tabs.query = async () => [{ id: 99, url: "https://loading.example/" }];
+  const execute = chrome.scripting.executeScript;
+  chrome.scripting.executeScript = options => options.target.tabId === 99
+    ? new Promise(() => {}) : execute(options);
+  await Promise.race([
+    h.toggleRecording({ id: 42, windowId: 9, url: "https://example.com" }),
+    new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error("Unrelated tab blocked capture")), 1000); timer.unref(); }),
+  ]);
+  assert.ok(h.calls.some(call => call.type === "CAPTURE"));
+  assert.equal(h.sessionStorage.pointCollectionSuspended, true);
+  const hide = h.calls.find(call => call.type === "SCRIPT" && call.func);
+  assert.equal(hide.target.tabId, 42);
+  assert.ok(h.calls.indexOf(hide) < h.calls.findIndex(call => call.type === "CAPTURE"));
+});
+
+test("next-point command visits saved positions once in order with scrolling switch off", async () => {
+  const h = await setup({ phase: "recording", tabId: 42, sessionId: "points" }, true);
+  h.preferences[SCROLL_POINTS_KEY] = { "https://example.com/": [940, 3760] };
+  chrome.tabs.get = async () => ({ id: 42, url: "https://example.com/#anchor" });
+  await h.handleScrollCommand("scroll-next-point");
+  await h.handleScrollCommand("scroll-next-point");
+  await h.handleScrollCommand("scroll-next-point");
+  const positions = h.calls.filter(call => call.type === "SCRIPT" && call.args?.[0]?.action === "point");
+  assert.deepEqual(positions.map(call => call.args[0].top), [940, 3760]);
+  assert.ok(positions.every(call => call.args[0].settings.durationMs === 1500));
 });

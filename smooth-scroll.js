@@ -7,14 +7,16 @@ export function scrollPage(command) {
     if (controller?.sessionId === command.sessionId) controller.cancel();
     return { running: Boolean(globalThis[key]), queued: globalThis[key]?.queue.length || 0 };
   }
-  if (command.action !== "step" || ![1, -1].includes(command.direction)) {
+  const point = command.action === "point" && Number.isFinite(command.top) && command.top >= 0;
+  if (!point && (command.action !== "step" || ![1, -1].includes(command.direction))) {
     throw new Error("Invalid scroll command.");
   }
   if (controller?.sessionId !== command.sessionId) {
     controller?.cancel();
     controller = null;
   }
-  const step = { direction: command.direction, ...command.settings };
+  if (point && controller && !controller.isRoot) { controller.cancel(); controller = null; }
+  const step = { direction: command.direction, ...command.settings, ...(point ? { top: command.top } : {}) };
   if (controller) {
     controller.queue.push(step);
     return { running: true, queued: controller.queue.length };
@@ -28,7 +30,7 @@ export function scrollPage(command) {
   if (!root) return { running: false, queued: 0 };
   let target = root;
   // Some applications scroll a large inner panel instead of the document.
-  if (root.scrollHeight <= root.clientHeight + 1) {
+  if (!point && root.scrollHeight <= root.clientHeight + 1) {
     let largestVisibleArea = 0;
     for (const element of doc.querySelectorAll("body *")) {
       if (element.scrollHeight <= element.clientHeight + 1 || element.clientHeight < 1) continue;
@@ -66,7 +68,7 @@ export function scrollPage(command) {
     view.removeEventListener("pagehide", cleanup);
     if (globalThis[key] === controller) delete globalThis[key];
   }
-  controller = { sessionId: command.sessionId, queue, cancel: cleanup };
+  controller = { sessionId: command.sessionId, queue, cancel: cleanup, isRoot: target === root };
   globalThis[key] = controller;
   view.addEventListener("pagehide", cleanup, { once: true });
 
@@ -90,7 +92,7 @@ export function scrollPage(command) {
     const current = queue.shift();
     if (!current) return cleanup();
     const from = target.scrollTop;
-    const to = Math.max(0, Math.min(maxScroll(), from + current.direction * viewportHeight * current.stepPercent / 100));
+    const to = Math.max(0, Math.min(maxScroll(), Number.isFinite(current.top) ? current.top : from + current.direction * viewportHeight * current.stepPercent / 100));
     if (Math.abs(to - from) < 0.01) {
       // Consume boundary presses without recursion or an extra animation.
       frameId = requestAnimationFrame(next);

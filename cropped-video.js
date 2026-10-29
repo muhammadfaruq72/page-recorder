@@ -183,7 +183,10 @@ export async function prepareRecordingVideo(source, mobile, viewport = {}, onErr
   }
 
   try {
-    stream = canvas.captureStream(0);
+    // MP4 hardware encoders need a positive nominal frame rate. A manual-only
+    // captureStream(0) advertises zero FPS and can fail encoder configuration.
+    // The canvas still submits only changed frames and the static heartbeat.
+    stream = canvas.captureStream(frameRate);
     outputTrack = stream.getVideoTracks()[0];
     manualFrames = typeof outputTrack.requestFrame === "function";
     if (!manualFrames) {

@@ -1,4 +1,4 @@
-import { loadWindowWidth, saveWindowWidth, validateWindowWidth, loadScrollSettings, saveScrollSettings, loadMobileSettings, saveMobileSettings, loadOutputSettings, saveOutputSettings, DEFAULT_OUTPUT_SETTINGS, scaledOutputSize, recordingBitrate } from "./settings.js";
+import { loadWindowWidth, saveWindowWidth, validateWindowWidth, loadScrollSettings, saveScrollSettings, loadMobileSettings, saveMobileSettings, loadOutputSettings, saveOutputSettings, DEFAULT_OUTPUT_SETTINGS, scaledOutputSize, recordingBitrate, COLLECT_POINTS_KEY, SCROLL_POINTS_KEY } from "./settings.js";
 
 const form = document.querySelector("#width-form");
 const fields = document.querySelector("#fields");
@@ -283,9 +283,10 @@ async function loadShortcuts() {
   try {
     const commands = await chrome.commands.getAll();
     document.querySelector("#shortcut-down").textContent = commands.find(command => command.name === "scroll-down")?.shortcut || "Not assigned";
+    document.querySelector("#shortcut-point").textContent = commands.find(command => command.name === "scroll-next-point")?.shortcut || "Not assigned";
     document.querySelector("#shortcut-full").textContent = commands.find(command => command.name === "scroll-up")?.shortcut || "Not assigned";
   } catch {
-    for (const id of ["#shortcut-down", "#shortcut-full"]) document.querySelector(id).textContent = "See Chrome shortcuts";
+    for (const id of ["#shortcut-down", "#shortcut-full", "#shortcut-point"]) document.querySelector(id).textContent = "See Chrome shortcuts";
   }
 }
 
@@ -295,3 +296,83 @@ document.querySelector("#change-shortcuts").addEventListener("click", () => {
 window.addEventListener("focus", () => { void loadShortcuts(); });
 void initializeScrolling();
 void loadShortcuts();
+
+async function refreshRecorderStatus() {
+  const element = document.querySelector("#recorder-status");
+  try {
+    const title = await chrome.action.getTitle({});
+    element.textContent = title;
+    element.dataset.error = String(await chrome.action.getBadgeText({}) === "!");
+    const contexts = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
+    if (contexts.length) {
+      const response = await chrome.runtime.sendMessage({ target: "recorder", type: "STATUS" });
+      const size = response?.status?.settings;
+      if (size?.width) element.textContent += ` Video: ${size.width} × ${size.height}, ${size.frameRate} FPS.`;
+    }
+  } catch (error) { element.textContent = error.message; }
+}
+void refreshRecorderStatus();
+setInterval(refreshRecorderStatus, 1500);
+
+const collectPoints = document.querySelector("#points-collect");
+const clearPoints = document.querySelector("#points-clear");
+const pointsList = document.querySelector("#points-list");
+const pointsStatus = document.querySelector("#points-status");
+function pointStatus(text, error = false) {
+  pointsStatus.textContent = text;
+  pointsStatus.dataset.error = String(error);
+}
+async function renderPoints() {
+  const saved = await chrome.storage.local.get([COLLECT_POINTS_KEY, SCROLL_POINTS_KEY]);
+  collectPoints.checked = !!saved[COLLECT_POINTS_KEY];
+  pointsList.replaceChildren();
+  const pages = Object.entries(saved[SCROLL_POINTS_KEY] || {}).filter(([, points]) => points.length);
+  for (const [url, points] of pages) {
+    const title = document.createElement("p");
+    title.textContent = url;
+    const list = document.createElement("ol");
+    for (const top of points) {
+      const item = document.createElement("li");
+      item.textContent = `${top.toLocaleString()} px from top`;
+      list.append(item);
+    }
+    pointsList.append(title, list);
+  }
+  if (!pages.length) pointsList.textContent = "No scroll points saved yet.";
+  clearPoints.disabled = !pages.length;
+}
+collectPoints.addEventListener("change", async () => {
+  const enabled = collectPoints.checked;
+  collectPoints.disabled = true;
+  try {
+    // Request directly inside this user gesture, before any asynchronous work.
+    if (enabled && !await chrome.permissions.request({ origins: ["http://*/*", "https://*/*"] })) {
+      throw new Error("Website access is required to show the collection button. Collection remains off.");
+    }
+    await chrome.storage.local.set({ [COLLECT_POINTS_KEY]: enabled });
+    pointStatus(enabled ? "Collection is on. Open your webpage and click Save scroll point at each position." : "Collection is off. Saved points are ready for recording.");
+  } catch (error) {
+    pointStatus(error.message, true);
+  } finally {
+    await renderPoints();
+    collectPoints.disabled = false;
+  }
+});
+clearPoints.addEventListener("click", async () => {
+  clearPoints.disabled = true;
+  try {
+    const result = await chrome.runtime.sendMessage({ target: "background", type: "CLEAR_SCROLL_POINTS" });
+    if (!result?.ok) throw new Error(result?.error || "Could not clear points.");
+    await renderPoints();
+    pointStatus("All saved scroll points cleared.");
+  } catch (error) { pointStatus(error.message, true); clearPoints.disabled = false; }
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && (changes[COLLECT_POINTS_KEY] || changes[SCROLL_POINTS_KEY])) {
+    void renderPoints().catch(error => pointStatus(error.message, true));
+  }
+});
+void renderPoints().then(() => {
+  collectPoints.disabled = false;
+  pointStatus("Points play in collection order with the next-point shortcut during recording.");
+}).catch(error => pointStatus(error.message, true));

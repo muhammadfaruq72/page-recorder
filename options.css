@@ -73,4 +73,7 @@ button.secondary:hover { background: #f4f5f7; }
 .advanced-settings > label { margin-top: 18px; }
 .advanced-settings .help:last-child { margin-bottom: 0; }
 #output-bitrate-mbps:disabled { opacity: .55; }
+.points-list { margin-bottom: 18px; font-size: 13px; line-height: 1.6; }
+.points-list p { overflow-wrap: anywhere; margin-bottom: 6px; font-weight: 600; }
+.points-list ol { margin-top: 0; padding-left: 24px; max-height: 240px; overflow: auto; }
 @media (prefers-color-scheme: dark) { .advanced-settings { border-color: #2c3544; } }
