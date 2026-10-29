@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Page Recorder",
-  "version": "1.7.0",
+  "version": "1.12.0",
   "description": "Click once to record the current webpage. Click again to stop and save the video.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -40,7 +40,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Page Recorder \u2014 click to record this tab",
+    "default_title": "Page Recorder — click to record this tab",
     "default_icon": {
       "16": "icons/record-16.png",
       "32": "icons/record-32.png",

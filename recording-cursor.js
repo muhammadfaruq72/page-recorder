@@ -6,6 +6,9 @@ export function recordingCursorStyle(sessionId) {
 
 export async function hideRecordingCursor(tabId, sessionId) {
   const css = recordingCursorStyle(sessionId);
+  // Chromium keeps repeated insertCSS calls as separate sheets. Replace the
+  // prior copy so a single cleanup restores the page even after many refreshes.
+  await restoreRecordingCursor({ tabId, cursorSessionId: sessionId });
   try {
     await chrome.scripting.insertCSS({ target: { tabId, allFrames: true }, css, origin: "USER" });
   } catch {

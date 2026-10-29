@@ -1,14 +1,63 @@
 import { prepareRecordingWindow } from "./window-size.js";
-import { loadScrollSettings, SCROLL_SETTINGS_KEY, loadMobileSettings } from "./settings.js";
+import { loadScrollSettings, SCROLL_SETTINGS_KEY, loadMobileSettings, loadOutputSettings, scaledOutputSize, DEFAULT_OUTPUT_SETTINGS } from "./settings.js";
 import { scrollPage } from "./smooth-scroll.js";
 import { recordingShortcuts } from "./recording-shortcuts.js";
 import { startMobileViewport, refreshMobileViewport, closeMobileViewport, mobileViewportSession, forgetMobileViewport } from "./mobile-viewport.js";
 import { hideRecordingCursor, restoreRecordingCursor } from "./recording-cursor.js";
 
 const OFFSCREEN_URL = "offscreen.html";
+
+function desktopExportViewport(width, height, exportScale, cursorVisible) {
+  return { width, height, ...scaledOutputSize(width, height, exportScale), exportScale, cursorVisible };
+}
+
 let toggling = false;
 let creatingDocument;
+let cancelCountdown;
+let statusUpdates = Promise.resolve();
 const recentScrollKeys = [];
+
+function queueRecordingUpdate(operation) {
+  const result = statusUpdates.catch(() => {}).then(operation);
+  statusUpdates = result;
+  return result;
+}
+
+async function delayRecordingStart(delayMs) {
+  if (!delayMs) return;
+  let timer;
+  let finished = false;
+  let inFlight = Promise.resolve();
+  try {
+    await new Promise((resolve, reject) => {
+      const deadline = Date.now() + delayMs;
+      function tick() {
+        if (finished) return;
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) { finished = true; resolve(); return; }
+        const seconds = Math.ceil(remaining / 1000);
+        inFlight = Promise.all([
+          chrome.action.setBadgeText({ text: String(seconds) }),
+          chrome.action.setTitle({ title: `Page Recorder — starts in ${seconds}s; click to cancel` }),
+        ]).then(() => {
+          if (!finished) timer = setTimeout(tick, Math.min(1000, Math.max(1, deadline - Date.now())));
+        }, error => { finished = true; reject(error); });
+      }
+      cancelCountdown = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        void inFlight.then(() => reject(new DOMException("Recording countdown cancelled.", "AbortError")));
+      };
+      tick();
+    });
+  } finally {
+    finished = true;
+    clearTimeout(timer);
+    cancelCountdown = undefined;
+  }
+  await updateAction({ phase: "starting" });
+}
 
 async function stopMobileRecording(tabId, mobileSessionId, error) {
   if (!await hasRecorderDocument()) return;
@@ -42,15 +91,22 @@ async function refreshRecordedShortcuts(tabId) {
   if (!await hasRecorderDocument()) return;
   const { status } = await recorderMessage("STATUS");
   if (status.phase !== "recording" || status.tabId !== tabId) return;
-  if (status.cursorSessionId) await hideRecordingCursor(tabId, status.cursorSessionId);
-  if (status.mobileSessionId) {
-    const session = await mobileViewportSession();
-    if (session?.tabId === tabId && session.sessionId === status.mobileSessionId) {
-      const viewport = await refreshMobileViewport(session);
-      await recorderMessage("MOBILE_CROP", { mobileSessionId: session.sessionId, region: viewport.mobile.region });
-    }
+  if (status.cursorSessionId) {
+    if (status.cursorVisible === false) await hideRecordingCursor(tabId, status.cursorSessionId);
+    else await restoreRecordingCursor(status);
   }
+  await refreshRecordedMobileViewport(tabId, status);
   await syncRecordedShortcuts(status);
+}
+
+async function refreshRecordedMobileViewport(tabId, knownStatus) {
+  if (!knownStatus && !await hasRecorderDocument()) return;
+  const status = knownStatus || (await recorderMessage("STATUS")).status;
+  if (status.phase !== "recording" || status.tabId !== tabId || !status.mobileSessionId) return;
+  const session = await mobileViewportSession();
+  if (session?.tabId !== tabId || session.sessionId !== status.mobileSessionId) return;
+  const viewport = await refreshMobileViewport(session);
+  await recorderMessage("MOBILE_CROP", { mobileSessionId: session.sessionId, region: viewport.mobile.region });
 }
 
 async function hasRecorderDocument() {
@@ -136,10 +192,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, change) => {
-  if (change.status === "complete") return refreshRecordedShortcuts(tabId).catch(error => console.debug("Page shortcuts:", error.message));
+  if (change.status === "complete") return queueRecordingUpdate(() => refreshRecordedShortcuts(tabId)).catch(error => console.debug("Page shortcuts:", error.message));
 });
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-  return refreshRecordedShortcuts(tabId).catch(error => console.debug("Tab shortcuts:", error.message));
+  return queueRecordingUpdate(() => refreshRecordedShortcuts(tabId)).catch(error => console.debug("Tab shortcuts:", error.message));
 });
 
 // The debugger API never opens Inspect. Losing the connection ends the
@@ -152,23 +208,26 @@ chrome.debugger.onDetach.addListener(source => {
   })().catch(error => console.debug("Mobile connection:", error.message));
 });
 chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (method === "Page.frameResized") {
+    return queueRecordingUpdate(() => refreshRecordedMobileViewport(source.tabId)).catch(error => console.debug("Mobile tab resize:", error.message));
+  }
   if (method !== "Page.frameNavigated" || params.frame.parentId) return;
   return (async () => {
     const session = await mobileViewportSession();
     if (session?.tabId !== source.tabId) return;
     const url = new URL(params.frame.url);
-    // A different origin revokes activeTab access, including cursor hiding and
-    // the page keyboard fallback. Save before recording an uncontrolled page.
+    // A different origin revokes activeTab access to the page keyboard
+    // fallback. Save before recording an uncontrolled page.
     if (!/^(https?:|file:)$/.test(url.protocol) || url.origin !== session.origin) {
       await stopMobileRecording(source.tabId, session.sessionId, "The recorded tab navigated to a different website. Start a new recording there.");
     }
   })().catch(error => console.debug("Mobile navigation:", error.message));
 });
 chrome.windows.onBoundsChanged.addListener(window => {
-  return (async () => {
+  return queueRecordingUpdate(async () => {
     const session = await mobileViewportSession();
-    if (session?.windowId === window.id) await refreshRecordedShortcuts(session.tabId);
-  })().catch(error => console.debug("Mobile resize:", error.message));
+    if (session?.windowId === window.id) await refreshRecordedMobileViewport(session.tabId);
+  }).catch(error => console.debug("Mobile resize:", error.message));
 });
 
 export async function updateAction(status) {
@@ -193,6 +252,7 @@ export async function updateAction(status) {
 }
 
 export async function toggleRecording(tab) {
+  await statusUpdates.catch(() => {});
   const status = await hasRecorderDocument()
     ? (await recorderMessage("STATUS")).status
     : { phase: "idle" };
@@ -214,18 +274,21 @@ export async function toggleRecording(tab) {
   }
 
   await updateAction({ phase: "starting" });
+  const output = await loadOutputSettings();
   const mobile = await loadMobileSettings();
+  const cursorSessionId = output.cursorVisible ? undefined : crypto.randomUUID();
   const mobileSessionId = mobile.enabled ? crypto.randomUUID() : undefined;
-  const cursorSessionId = crypto.randomUUID();
   try {
     let viewport;
     if (mobile.enabled) {
-      viewport = await startMobileViewport(tab, mobile, mobileSessionId);
+      viewport = await startMobileViewport(tab, { ...mobile, exportScale: output.exportScale }, mobileSessionId);
     } else {
       const resizedTab = await prepareRecordingWindow(tab);
-      viewport = { width: resizedTab.width, height: resizedTab.height };
+      viewport = desktopExportViewport(resizedTab.width, resizedTab.height, output.exportScale, output.cursorVisible);
     }
-    await hideRecordingCursor(tab.id, cursorSessionId);
+    Object.assign(viewport, output);
+    await delayRecordingStart(output.startDelayMs);
+    if (cursorSessionId) await hideRecordingCursor(tab.id, cursorSessionId);
     await ensureRecorderDocument();
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
     await recorderMessage("START", { streamId, tabId: tab.id, viewport, cursorSessionId, ...(mobileSessionId ? { mobileSessionId } : {}) });
@@ -238,10 +301,11 @@ export async function toggleRecording(tab) {
 
 chrome.action.onClicked.addListener(tab => {
   // Lock synchronously so rapid clicks cannot open overlapping capture streams.
-  if (toggling) return;
+  if (toggling) { cancelCountdown?.(); return; }
   toggling = true;
   toggleRecording(tab)
     .catch(error => {
+      if (error.name === "AbortError") return updateAction({ phase: "idle" });
       console.error("Page Recorder:", error);
       return updateAction({ phase: "error", error: error.message });
     })
@@ -263,13 +327,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   let operation;
   if (message.type === "STATUS_CHANGED") {
-    operation = Promise.all([
-      updateAction(message.status),
-      syncRecordedShortcuts(message.status),
-      message.status.phase === "recording" ? undefined : cancelRecordedScroll(message.status),
-      ["saving", "idle", "error"].includes(message.status.phase) ? closeMobileViewport(message.status) : undefined,
-      ["saving", "idle", "error"].includes(message.status.phase) ? restoreRecordingCursor(message.status) : undefined,
-    ]).then(() => ({}));
+    // Finish restoration before presenting idle or accepting another start.
+    // Recorder notifications can arrive while the prior cleanup is in flight.
+    operation = queueRecordingUpdate(async () => {
+      const status = message.status;
+      if (status.phase !== "recording") await cancelRecordedScroll(status);
+      await syncRecordedShortcuts(status);
+      if (["saving", "idle", "error"].includes(status.phase)) {
+        await closeMobileViewport(status);
+        await restoreRecordingCursor(status);
+      }
+      await updateAction(status);
+      return {};
+    });
+  } else if (message.type === "DESKTOP_READY") {
+    operation = (async () => {
+      const { status } = await recorderMessage("STATUS");
+      if (status.phase !== "starting" || status.mobileSessionId || status.tabId !== message.tabId || status.sessionId !== message.sessionId) {
+        throw new Error("The desktop recording session is no longer starting.");
+      }
+      // Capture can add a sharing banner. Measure the final CSS viewport so
+      // the exported canvas uses the saved scale, independently of Retina DPI.
+      let tab = await chrome.tabs.get(status.tabId);
+      let stable = 0;
+      const start = Date.now();
+      while (Date.now() - start < 1500) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const next = await chrome.tabs.get(status.tabId);
+        stable = next.width === tab.width && next.height === tab.height ? stable + 1 : 0;
+        tab = next;
+        if (stable >= 3 && Date.now() - start >= 250) break;
+      }
+      return { viewport: desktopExportViewport(tab.width, tab.height, status.exportScale || DEFAULT_OUTPUT_SETTINGS.exportScale, status.cursorVisible !== false) };
+    })();
+  } else if (message.type === "MOBILE_READY") {
+    operation = (async () => {
+      const session = await mobileViewportSession();
+      if (!session || session.sessionId !== message.mobileSessionId) throw new Error("The mobile viewport was disconnected before capture started.");
+      // Starting tab capture can add another browser sharing banner. Fit after
+      // getUserMedia so both the preview and crop use the final available area.
+      const viewport = await refreshMobileViewport(session, { settle: true });
+      await chrome.debugger.sendCommand({ tabId: session.tabId }, "Runtime.evaluate", {
+        expression: "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+        awaitPromise: true, returnByValue: true,
+      });
+      return { region: viewport.mobile.region };
+    })();
   } else if (message.type === "DOWNLOAD") {
     // Blob URLs must belong to this extension's offscreen document.
     if (!message.url?.startsWith(`blob:chrome-extension://${chrome.runtime.id}/`)) return;

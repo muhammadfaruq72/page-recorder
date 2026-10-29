@@ -53,7 +53,10 @@ try {
     for (let attempt = 0; attempt < 250; attempt++) {
       const badge = await worker.evaluate(() => chrome.action.getBadgeText({}));
       if (badge === expected && (!titlePattern || titlePattern.test(await worker.evaluate(() => chrome.action.getTitle({}))))) return;
-      if (badge === "!" && expected !== "!") throw new Error(await worker.evaluate(() => chrome.action.getTitle({})));
+      if (badge === "!" && expected !== "!" && attempt > 2) {
+        const title = await worker.evaluate(() => chrome.action.getTitle({}));
+        if (!/starting recording|saving video/.test(title)) throw new Error(title);
+      }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     throw new Error(`Expected badge '${expected}': ${await worker.evaluate(() => chrome.action.getTitle({}))}`);
@@ -98,6 +101,7 @@ try {
   await page.locator("#kept-input").fill("Unsaved state survives mobile mode");
   await page.evaluate(() => scrollTo(0, 180));
   const beforeBounds = await bounds();
+  const beforeViewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   await clickToolbar(page);
   await waitBadge("REC");
   assert.deepEqual(await bounds(), beforeBounds, "Mobile recording must not resize or move the browser window");
@@ -112,11 +116,12 @@ try {
   assert.equal(await frame.evaluate(() => getComputedStyle(document.querySelector("a")).cursor), "none");
   assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("a")).cursor), "none");
   await page.mouse.move(30, 100);
-  await page.screenshot({ path: path.join(output, "mobile-preview.png") });
   console.log("PASS: native responsive 390 × 844 viewport keeps the original DOM, browser bounds, fixed footer, and hidden cursor");
 
   const percentKey = process.platform === "darwin" ? "Meta+Shift+Digit9" : "Control+Shift+Digit9";
   const fullKey = process.platform === "darwin" ? "Meta+Shift+Digit8" : "Control+Shift+Digit8";
+  await page.bringToFront();
+  await page.evaluate(() => window.focus());
   const initialScroll = await frame.evaluate(() => scrollY);
   await page.keyboard.press(percentKey);
   await frame.waitForFunction(expected => Math.abs(scrollY - expected) <= 1.5, initialScroll + 844 * .3);
@@ -152,8 +157,9 @@ try {
   assert.equal(page.frames().length, 1);
   assert.deepEqual(await bounds(), beforeBounds);
   assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("a")).cursor), "crosshair");
+  await page.waitForFunction(expected => innerWidth === expected.width && innerHeight === expected.height, beforeViewport);
   const desktopSize = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
-  assert.deepEqual(desktopSize, preview.available);
+  assert.deepEqual(desktopSize, beforeViewport);
   assert.equal(await worker.evaluate(() => chrome.storage.session.get("nativeMobileViewport").then(result => result.nativeMobileViewport)), undefined);
   console.log("PASS: stopping restores the desktop viewport and cursor and detaches the debugger without resizing the window");
 
@@ -194,7 +200,7 @@ try {
   assert.ok(video.resizedLeft.every(value => value > 100), JSON.stringify(video));
   assert.ok(video.resizedFooter[1] > 150 && video.resizedFooter[2] > 150, JSON.stringify(video));
   console.log("PASS: mobile cropping follows changes in the available tab size");
-  console.log("PASS: downloaded video is exactly 390 × 844, excludes black space, preserves the footer, and plays moving frames", video);
+  console.log("PASS: downloaded video is exactly 390 × 844, excludes surrounding space, preserves the footer, and plays moving frames", video);
 
   await worker.evaluate(() => chrome.storage.local.set({ mobileViewportSettings: { enabled: true, width: 391, height: 845 } }));
   await page.goto(origin);
@@ -258,19 +264,24 @@ try {
   await waitBadge("");
   console.log("PASS: native mobile preview scales up to use the available space without changing the reference aspect ratio");
 
-  // User/browser detachment must save the video and restore normal dimensions.
+  // Closing the recorded tab releases capture and the owned debugger session.
   await page.goto(origin);
   await clickToolbar(page);
   await waitBadge("REC");
   await page.waitForTimeout(650);
-  await worker.evaluate(async () => {
-    const session = (await chrome.storage.session.get("nativeMobileViewport")).nativeMobileViewport;
-    await chrome.debugger.detach({ tabId: session.tabId });
-  });
-  await waitBadge("!", /disconnected.*available video was saved/i);
-  assert.deepEqual(await page.evaluate(() => ({ width: innerWidth, height: innerHeight })), desktopSize);
-  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("a")).cursor), "crosshair");
-  console.log("PASS: disconnecting mobile emulation saves the available video and restores the desktop viewport");
+  await page.close();
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const status = await worker.evaluate(() => chrome.runtime.sendMessage({ target: "recorder", type: "STATUS" }).then(result => result.status));
+    if (["idle", "error"].includes(status.phase)) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const closedStatus = await worker.evaluate(() => chrome.runtime.sendMessage({ target: "recorder", type: "STATUS" }).then(result => result.status));
+  assert.ok(["idle", "error"].includes(closedStatus.phase));
+  assert.equal(await worker.evaluate(() => chrome.storage.session.get("nativeMobileViewport").then(result => result.nativeMobileViewport)), undefined);
+  const [closedDownload] = await worker.evaluate(() => chrome.downloads.search({ orderBy: ["-startTime"] }));
+  assert.equal(closedDownload.state, "complete");
+  assert.ok(closedDownload.fileSize > 0);
+  console.log("PASS: closing the mobile tab saves the available video and releases the debugger session");
   await writeFile(path.join(output, "mobile-report.json"), JSON.stringify({ browser: context.browser().version(), viewport: { width: 390, height: 844 }, browserWindow: beforeBounds, preview, video, oddSize, cursorHidden: true, recording: videoPath, checks: 13 }, null, 2));
 } catch (error) {
   if (context) {

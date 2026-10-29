@@ -1,4 +1,4 @@
-import { PageRecorder } from "./recorder.js";
+import { PageRecorder, captureSize, FPS } from "./recorder.js";
 import { createRecordingFile } from "./recording-file.js";
 import { prepareRecordingVideo, sourceCropRect } from "./cropped-video.js";
 
@@ -15,7 +15,29 @@ const recorder = new PageRecorder({
   getMedia: constraints => navigator.mediaDevices.getUserMedia(constraints),
   MediaRecorderClass: MediaRecorder,
   createFile: createRecordingFile,
-  prepareVideo: prepareRecordingVideo,
+  prepareVideo: async (source, mobile, viewport) => {
+    if (mobile) {
+      const { region } = await backgroundMessage("MOBILE_READY", { mobileSessionId: recordingContext.mobileSessionId });
+      mobile.region = region;
+    } else {
+      const ready = await backgroundMessage("DESKTOP_READY", { tabId: recordingContext.tabId, sessionId: recordingContext.sessionId });
+      Object.assign(viewport, ready.viewport);
+    }
+    const sourceViewport = mobile
+      ? { width: mobile.region.viewportWidth, height: mobile.region.viewportHeight, mobile }
+      : viewport;
+    const size = captureSize(sourceViewport);
+    const frameRate = viewport.frameRate || FPS;
+    try {
+      await source.getVideoTracks()[0].applyConstraints({
+        width: { exact: size.maxWidth }, height: { exact: size.maxHeight },
+        frameRate: { ideal: frameRate, max: frameRate }, cursor: viewport.cursorVisible === false ? "never" : "always",
+      });
+    } catch (error) {
+      console.warn("Using the available source resolution for recording:", error.message);
+    }
+    return prepareRecordingVideo(source, mobile, viewport, error => recorder.stop(error.message));
+  },
   onStatus: status => backgroundMessage("STATUS_CHANGED", { status: withRecordingContext(status) }),
   download: async (url, filename) => {
     const { downloadId } = await backgroundMessage("DOWNLOAD", { url, filename });
@@ -40,14 +62,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true, status: withRecordingContext(recorder.status) });
       return;
     case "START":
-      recordingContext = { tabId: message.tabId, sessionId: crypto.randomUUID(), cursorSessionId: message.cursorSessionId, ...(message.mobileSessionId ? { mobileSessionId: message.mobileSessionId } : {}) };
+      recordingContext = { tabId: message.tabId, sessionId: crypto.randomUUID(), cursorSessionId: message.cursorSessionId, cursorVisible: message.viewport?.cursorVisible !== false, exportScale: message.viewport?.exportScale, ...(message.mobileSessionId ? { mobileSessionId: message.mobileSessionId } : {}) };
       operation = recorder.start(message.streamId, message.tabId, {
         ...message.viewport,
         devicePixelRatio: window.devicePixelRatio || 1,
       });
       break;
     case "MOBILE_CROP":
-      if (sender.url !== chrome.runtime.getURL("background.js") || message.mobileSessionId !== recordingContext.mobileSessionId || !recorder.mobileCrop) return;
+      if (sender.url !== chrome.runtime.getURL("background.js")) return;
+      if (message.mobileSessionId !== recordingContext.mobileSessionId || !recorder.mobileCrop) {
+        sendResponse({ ok: true }); // A resize can finish just after stop.
+        return;
+      }
       try { sourceCropRect(message.region, 1, 1); } catch { sendResponse({ ok: false }); return; }
       recorder.mobileCrop.region = message.region;
       sendResponse({ ok: true });

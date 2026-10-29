@@ -1,25 +1,45 @@
+import { recordingBitrate, DEFAULT_OUTPUT_SETTINGS } from "./settings.js";
+
 export const FPS = 60;
 export const BITRATE = 30_000_000;
-export const CHUNK_MS = 5_000;
+export const CHUNK_MS = 1_000;
+const MAX_PENDING_WRITE_BYTES = 64 * 1024 * 1024;
+// Every candidate uses a real MP4 muxer. Never silently fall back to WebM.
 export const MIME_TYPES = [
   "video/mp4;codecs=avc1",
-  "video/x-matroska;codecs=avc1",
-  "video/webm;codecs=vp8",
-  "video/webm",
+  "video/mp4;codecs=hvc1",
+  "video/mp4;codecs=hev1",
+  "video/mp4",
 ];
 
-export function videoExtension(mimeType = "") {
-  if (mimeType.startsWith("video/mp4")) return "mp4";
-  if (mimeType.startsWith("video/x-matroska")) return "mkv";
-  return "webm";
+export function videoExtension(mimeType = "video/mp4") {
+  if (!/^video\/mp4(?:;|$)/i.test(mimeType)) throw new Error("The encoder did not produce MP4 video.");
+  return "mp4";
 }
 
-export function recordingFilename(mimeType, date = new Date()) {
-  return `Page Recorder/recording-${date.toISOString().replace(/[:.]/g, "-")}.${videoExtension(mimeType)}`;
+export function recordingFilename(mimeType, date = new Date(), prefix = "recording") {
+  return `Page Recorder/${prefix}-${date.toISOString().replace(/[:.]/g, "-")}.${videoExtension(mimeType)}`;
 }
 
-export function captureSize({ width, height, devicePixelRatio = 1 } = {}, h264 = false) {
+export function captureSize({ width, height, devicePixelRatio = 1, mobile, outputWidth, outputHeight } = {}, h264 = false) {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return {};
+  if (mobile?.outputWidth > 0 && mobile?.outputHeight > 0 && mobile.region?.width > 0 && mobile.region?.height > 0) {
+    // Request enough source pixels for the mobile crop, including the unused
+    // portion of the tab. Chromium's HiDPI tab capturer can rasterize above the
+    // display's pixel density. A margin covers sharing-banner height changes.
+    const wantedScale = Math.max(mobile.outputWidth / mobile.region.width, mobile.outputHeight / mobile.region.height) * 1.125;
+    const scale = Math.min(wantedScale, 8192 / width, 8192 / height);
+    const captureWidth = Math.min(8192, Math.max(2, Math.ceil(width * scale / 2) * 2));
+    const captureHeight = Math.min(8192, Math.max(2, Math.ceil(height * scale / 2) * 2));
+    // H.264 limits apply to the final cropped canvas, not this source stream.
+    return { minWidth: captureWidth, maxWidth: captureWidth, minHeight: captureHeight, maxHeight: captureHeight };
+  }
+  if (outputWidth > 0 && outputHeight > 0) {
+    const scale = Math.min(Math.max(outputWidth / width, outputHeight / height), 8192 / width, 8192 / height);
+    const captureWidth = Math.min(8192, Math.max(2, Math.ceil(width * scale / 2) * 2));
+    const captureHeight = Math.min(8192, Math.max(2, Math.ceil(height * scale / 2) * 2));
+    return { minWidth: captureWidth, maxWidth: captureWidth, minHeight: captureHeight, maxHeight: captureHeight };
+  }
   const landscape = width >= height;
   const maxWidth = h264 && !landscape ? 2304 : 4096;
   const maxHeight = h264 && landscape ? 2304 : 4096;
@@ -48,9 +68,12 @@ export class PageRecorder {
     this.recordingError = null;
     this.finalizing = null;
     this.bytesReceived = 0;
+    this.pendingWriteBytes = 0;
     this.encoderCandidates = [];
     this.nextEncoder = 0;
     this.stopReason = null;
+    this.videoBitsPerSecond = BITRATE;
+    this.autoStopTimer = undefined;
   }
 
   publish(phase, extra = {}) {
@@ -70,14 +93,25 @@ export class PageRecorder {
     this.recordingError = null;
     this.finalizing = null;
     this.bytesReceived = 0;
+    this.pendingWriteBytes = 0;
     this.nextEncoder = 0;
     this.stopReason = null;
+    this.videoBitsPerSecond = BITRATE;
+    clearTimeout(this.autoStopTimer);
+    this.autoStopTimer = undefined;
+    const options = { ...DEFAULT_OUTPUT_SETTINGS, ...viewport };
+    this.frameRate = options.frameRate;
+    this.codec = options.codec;
+    this.filenamePrefix = options.filenamePrefix;
 
     try {
-      const oddMobileSize = viewport.mobile && (viewport.mobile.width % 2 || viewport.mobile.height % 2);
-      const mimeTypes = MIME_TYPES.filter(type => this.MediaRecorderClass.isTypeSupported(type) && !(oddMobileSize && type.includes("avc1")));
-      this.encoderCandidates = [...mimeTypes, ""];
-      const preferredType = mimeTypes[0] || "";
+      const mimeTypes = MIME_TYPES.filter(type => this.MediaRecorderClass.isTypeSupported(type)
+        && (this.codec === "auto" || (this.codec === "h264" ? /avc1|avc3/.test(type) : /hvc1|hev1/.test(type))));
+      if (!mimeTypes.length) throw new Error(this.codec === "auto"
+        ? "This browser cannot record MP4. Update the browser to a version with MP4 recording support."
+        : `The selected ${this.codec === "h264" ? "H.264" : "HEVC"} MP4 codec is unavailable. Choose Auto or another MP4 codec.`);
+      this.encoderCandidates = mimeTypes;
+      const preferredType = mimeTypes[0];
       this.stream = await this.getMedia({
         audio: false,
         video: {
@@ -85,7 +119,7 @@ export class PageRecorder {
             chromeMediaSource: "tab",
             chromeMediaSourceId: streamId,
             ...captureSize(viewport, preferredType.includes("avc1")),
-            maxFrameRate: FPS,
+            maxFrameRate: this.frameRate,
           },
         },
       });
@@ -97,13 +131,13 @@ export class PageRecorder {
       const landscape = width >= height;
       const maxWidth = landscape ? 4096 : 2304;
       const maxHeight = landscape ? 2304 : 4096;
-      const scale = preferredType.includes("avc1") && width && height
+      const scale = !viewport.mobile && !viewport.outputWidth && preferredType.includes("avc1") && width && height
         ? Math.min(1, maxWidth / width, maxHeight / height)
         : 1;
       try {
         await track.applyConstraints({
-          cursor: "never",
-          frameRate: { ideal: FPS, max: FPS },
+          cursor: viewport.cursorVisible === false ? "never" : "always",
+          frameRate: { ideal: this.frameRate, max: this.frameRate },
           ...(scale < 1 ? {
             width: { ideal: Math.floor(width * scale) },
             height: { ideal: Math.floor(height * scale) },
@@ -115,18 +149,31 @@ export class PageRecorder {
       }
 
       this.mobileCrop = viewport.mobile;
-      const prepared = await this.prepareVideo(this.sourceStream, this.mobileCrop);
+      const prepared = await this.prepareVideo(this.sourceStream, this.mobileCrop, viewport);
       this.releaseVideo = prepared.release;
+      this.requestVideoFrame = prepared.requestFrame;
       this.stream = prepared.stream;
       const recordedTrack = this.stream.getVideoTracks()[0];
       if (!recordedTrack || recordedTrack.readyState === "ended") throw new Error("The recording video is unavailable.");
+      const recordedSize = recordedTrack.getSettings();
+      if (viewport.outputWidth || viewport.mobile?.outputWidth) {
+        // Prefer platform HEVC for frames beyond the usual H.264 Level 5.x
+        // macroblock budget, retaining H.264 and generic MP4 as alternatives.
+        const largeFrame = Math.ceil(recordedSize.width / 16) * Math.ceil(recordedSize.height / 16) > 36864;
+        if (largeFrame && this.codec === "auto") this.encoderCandidates.sort((a, b) => Number(/hvc1|hev1/.test(b)) - Number(/hvc1|hev1/.test(a)));
+        this.videoBitsPerSecond = recordingBitrate(recordedSize.width, recordedSize.height, options);
+      }
 
       this.file = await this.createFile();
       track.addEventListener("ended", () => this.stop(), { once: true });
+      if (recordedTrack !== track) recordedTrack.addEventListener("ended", () => this.stop("Video processing ended unexpectedly."), { once: true });
       if (track.readyState === "ended") throw new Error("The tab is no longer sharing.");
       this.beginEncoder();
       this.publish("recording", { tabId, startedAt: Date.now(), settings: recordedTrack.getSettings() });
-      console.info("Page Recorder started:", { ...recordedTrack.getSettings(), mimeType: this.recorder.mimeType, videoBitsPerSecond: BITRATE });
+      if (options.maxDurationSeconds > 0) {
+        this.autoStopTimer = setTimeout(() => this.stop(), options.maxDurationSeconds * 1000);
+      }
+      console.info("Page Recorder started:", { ...recordedTrack.getSettings(), mimeType: this.recorder.mimeType, targetFrameRate: this.frameRate, videoBitsPerSecond: this.videoBitsPerSecond });
     } catch (error) {
       this.releaseTracks();
       await this.discardFile();
@@ -142,19 +189,26 @@ export class PageRecorder {
       const mimeType = this.encoderCandidates[this.nextEncoder++];
       try {
         const encoder = new this.MediaRecorderClass(this.stream, {
-          videoBitsPerSecond: BITRATE,
-          ...(mimeType ? { mimeType } : {}),
+          videoBitsPerSecond: this.videoBitsPerSecond,
+          mimeType,
+          videoKeyFrameIntervalDuration: 1000,
         });
+        if (encoder.mimeType && !/^video\/mp4(?:;|$)/i.test(encoder.mimeType)) throw new Error("This encoder did not select an MP4 container.");
         let failedBeforeData = false;
         encoder.addEventListener("dataavailable", event => {
-          if (!event.data.size || this.writeError) return;
+          if (failedBeforeData || !event.data.size || this.writeError) return;
           this.bytesReceived += event.data.size;
+          this.pendingWriteBytes += event.data.size;
           this.writeQueue = this.writeQueue
-            .then(() => this.file.write(event.data))
+            .then(() => { if (!this.writeError) return this.file.write(event.data); })
             .catch(error => {
               this.writeError = error;
               this.stop();
-            });
+            })
+            .finally(() => { this.pendingWriteBytes -= event.data.size; });
+          if (this.pendingWriteBytes > MAX_PENDING_WRITE_BYTES) {
+            this.stop("The disk could not keep up. Recording stopped to avoid an unbounded memory backlog.");
+          }
         });
         encoder.addEventListener("error", event => {
           this.recordingError = event.error || new Error("The video encoder stopped unexpectedly.");
@@ -181,18 +235,21 @@ export class PageRecorder {
         }, { once: true });
         encoder.start(CHUNK_MS);
         this.recorder = encoder;
+        this.requestVideoFrame?.();
         return;
       } catch (error) {
         encoderError = error;
       }
     }
-    throw encoderError || this.recordingError || new Error("No video encoder is available.");
+    const size = this.stream?.getVideoTracks()[0]?.getSettings();
+    throw new Error(`MP4 encoding is unavailable${size?.width ? ` at ${size.width} × ${size.height}` : ""}. Choose a lower Output quality. ${encoderError?.message || this.recordingError?.message || "No MP4 encoder is available."}`);
   }
 
   stop(reason) {
     if (this.status.phase !== "recording") return;
     if (typeof reason === "string") this.stopReason = reason;
     this.publish("saving");
+    this.requestVideoFrame?.();
     if (this.recorder?.state !== "inactive") this.recorder.stop();
     // Stop capture promptly, including when Chrome's own Stop sharing was used.
     this.releaseTracks();
@@ -207,8 +264,8 @@ export class PageRecorder {
       if (this.writeError) throw this.writeError;
       const file = await this.file.finish();
       if (!file.size) throw this.recordingError || new Error("The recording was empty. Record the tab for a little longer.");
-      const type = this.recorder.mimeType || "video/webm";
-      this.filename = recordingFilename(type);
+      const type = this.recorder.mimeType || "video/mp4";
+      this.filename = recordingFilename(type, new Date(), this.filenamePrefix);
       this.savedBlob = file.slice(0, file.size, type);
       this.recorder = null;
       await this.save();
@@ -249,8 +306,11 @@ export class PageRecorder {
   }
 
   releaseTracks() {
+    clearTimeout(this.autoStopTimer);
+    this.autoStopTimer = undefined;
     const release = this.releaseVideo;
     this.releaseVideo = null;
+    this.requestVideoFrame = null;
     release?.();
     new Set([...(this.stream?.getTracks() || []), ...(this.sourceStream?.getTracks() || [])]).forEach(track => track.stop());
     this.stream = null;
@@ -270,6 +330,7 @@ export class PageRecorder {
 
   friendlyError(error) {
     if (error?.name === "QuotaExceededError") return "Your disk is full. Free some space and try again.";
+    if (["EncodingError", "NotSupportedError"].includes(error?.name)) return `MP4 encoding is unavailable at this resolution. Choose a lower Output quality. ${error.message}`;
     if (error?.name === "NotAllowedError") return "Chrome did not allow recording this tab. Open a regular webpage and try again.";
     return error?.message || "Recording failed. Try again.";
   }

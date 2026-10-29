@@ -1,4 +1,4 @@
-import { loadWindowWidth, saveWindowWidth, validateWindowWidth, loadScrollSettings, saveScrollSettings, loadMobileSettings, saveMobileSettings } from "./settings.js";
+import { loadWindowWidth, saveWindowWidth, validateWindowWidth, loadScrollSettings, saveScrollSettings, loadMobileSettings, saveMobileSettings, loadOutputSettings, saveOutputSettings, DEFAULT_OUTPUT_SETTINGS, scaledOutputSize, recordingBitrate } from "./settings.js";
 
 const form = document.querySelector("#width-form");
 const fields = document.querySelector("#fields");
@@ -45,6 +45,115 @@ const mobileFields = document.querySelector("#mobile-fields");
 const mobileWidth = document.querySelector("#mobile-width");
 const mobileHeight = document.querySelector("#mobile-height");
 const mobileStatus = document.querySelector("#mobile-status");
+const outputFields = document.querySelector("#output-fields");
+const outputScale = document.querySelector("#output-scale");
+const cursorVisible = document.querySelector("#cursor-visible");
+const outputStatus = document.querySelector("#output-status");
+const outputFps = document.querySelector("#output-fps");
+const bitrateMode = document.querySelector("#output-bitrate-mode");
+const bitrateMbps = document.querySelector("#output-bitrate-mbps");
+const outputCodec = document.querySelector("#output-codec");
+const startDelay = document.querySelector("#output-start-delay");
+const maxDuration = document.querySelector("#output-max-duration");
+const filenamePrefix = document.querySelector("#output-filename-prefix");
+const storageEstimate = document.querySelector("#output-storage-estimate");
+let outputSettings = { ...DEFAULT_OUTPUT_SETTINGS };
+const mobileOutputResolution = document.querySelector("#mobile-output-resolution");
+
+function updateStorageEstimate() {
+  const storage = bps => `${Math.round(bps * 60 / 8_000_000)} MB/min`;
+  if (outputSettings.bitrateMode === "custom") {
+    storageEstimate.textContent = `Target bitrate: ${outputSettings.bitrateMbps} Mbps · approximately ${storage(outputSettings.bitrateMbps * 1_000_000)}.`;
+    return;
+  }
+  if (mobileEnabled.checked) {
+    try {
+      const size = scaledOutputSize(mobileWidth.valueAsNumber, mobileHeight.valueAsNumber, outputSettings.exportScale);
+      const bps = recordingBitrate(size.outputWidth, size.outputHeight, outputSettings);
+      storageEstimate.textContent = `Current mobile target: ${(bps / 1_000_000).toFixed(1)} Mbps · approximately ${storage(bps)}. Actual file size varies with the page.`;
+      return;
+    } catch { /* Wait for valid mobile dimensions. */ }
+  }
+  const base = 30_000_000 * outputSettings.frameRate / 60;
+  storageEstimate.textContent = `Automatic bitrate: ${(base / 1_000_000).toFixed(1)}–120 Mbps (${storage(base)}–900 MB/min), depending on the final viewport. Actual file size varies.`;
+}
+
+function updateMobileOutput() {
+  const width = mobileWidth.valueAsNumber;
+  const height = mobileHeight.valueAsNumber;
+  const scale = outputSettings.exportScale;
+  try {
+    const size = scaledOutputSize(width, height, scale);
+    mobileOutputResolution.textContent = `${size.outputWidth} × ${size.outputHeight} px · MP4`;
+  } catch (error) {
+    mobileOutputResolution.textContent = Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0
+      ? error.message : "Enter viewport dimensions";
+  }
+  updateStorageEstimate();
+}
+
+for (const input of [mobileWidth, mobileHeight]) input.addEventListener("input", updateMobileOutput);
+
+function showOutputStatus(text, error = false) {
+  outputStatus.textContent = text;
+  outputStatus.dataset.error = String(error);
+}
+
+function renderOutputSettings() {
+  outputScale.value = String(outputSettings.exportScale);
+  cursorVisible.checked = outputSettings.cursorVisible;
+  outputFps.value = String(outputSettings.frameRate);
+  bitrateMode.value = outputSettings.bitrateMode;
+  bitrateMbps.value = outputSettings.bitrateMbps;
+  bitrateMbps.disabled = outputSettings.bitrateMode !== "custom";
+  outputCodec.value = outputSettings.codec;
+  startDelay.value = outputSettings.startDelayMs / 1000;
+  maxDuration.value = outputSettings.maxDurationSeconds;
+  filenamePrefix.value = outputSettings.filenamePrefix;
+  document.querySelector("#desktop-output-scale").textContent = `${outputSettings.exportScale}× resolution`;
+  updateMobileOutput();
+}
+
+function outputSummary() {
+  const codec = { auto: "Auto codec", h264: "H.264", hevc: "HEVC" }[outputSettings.codec];
+  const bitrate = outputSettings.bitrateMode === "custom" ? `${outputSettings.bitrateMbps} Mbps` : "Auto bitrate";
+  return `${outputSettings.exportScale}× · ${outputSettings.frameRate} FPS · ${bitrate} · ${codec} · Cursor ${outputSettings.cursorVisible ? "visible" : "hidden"}`;
+}
+
+async function initializeOutput() {
+  try {
+    outputSettings = await loadOutputSettings();
+    renderOutputSettings();
+    outputFields.disabled = false;
+    showOutputStatus(`${outputSummary()}. Applies to both modes on your next recording.`);
+  } catch (error) {
+    showOutputStatus(`Could not load output settings. ${error.message}`, true);
+  }
+}
+const outputReady = initializeOutput();
+
+async function saveSharedOutput() {
+  outputFields.disabled = true;
+  try {
+    outputSettings = await saveOutputSettings({
+      exportScale: Number(outputScale.value), cursorVisible: cursorVisible.checked,
+      frameRate: Number(outputFps.value), bitrateMode: bitrateMode.value,
+      bitrateMbps: bitrateMbps.valueAsNumber, codec: outputCodec.value,
+      startDelayMs: Math.round(startDelay.valueAsNumber * 1000),
+      maxDurationSeconds: maxDuration.valueAsNumber, filenamePrefix: filenamePrefix.value,
+    });
+    renderOutputSettings();
+    showOutputStatus(`Saved. ${outputSummary()}. Applies to both modes on your next recording.`);
+  } catch (error) {
+    renderOutputSettings();
+    showOutputStatus(`Could not save output settings. ${error.message}`, true);
+  } finally {
+    outputFields.disabled = false;
+  }
+}
+for (const input of [outputScale, cursorVisible, outputFps, bitrateMode, bitrateMbps, outputCodec, startDelay, maxDuration, filenamePrefix]) {
+  input.addEventListener("change", saveSharedOutput);
+}
 
 function showMobileStatus(text, error = false) {
   mobileStatus.textContent = text;
@@ -53,14 +162,16 @@ function showMobileStatus(text, error = false) {
 
 async function initializeMobile() {
   try {
+    await outputReady;
     const settings = await loadMobileSettings();
     mobileEnabled.checked = settings.enabled;
     mobileWidth.value = settings.width;
     mobileHeight.value = settings.height;
+    updateMobileOutput();
     mobileEnabled.disabled = false;
     mobileFields.disabled = !settings.enabled;
     showMobileStatus(settings.enabled
-      ? `Mobile mode: ${settings.width} × ${settings.height} px. Applies to the next recording.`
+      ? `Saved mobile layout: ${settings.width} × ${settings.height} px. Applies to the next recording.`
       : "Mobile mode is off. Recordings use your desktop window settings.");
   } catch (error) {
     showMobileStatus(`Could not load mobile mode. ${error.message}`, true);
@@ -82,6 +193,7 @@ mobileEnabled.addEventListener("change", async () => {
   } finally {
     mobileEnabled.disabled = false;
     mobileFields.disabled = !mobileEnabled.checked;
+    updateMobileOutput();
   }
 });
 
@@ -91,7 +203,8 @@ mobileForm.addEventListener("submit", async event => {
   mobileFields.disabled = true;
   try {
     const settings = await saveMobileSettings({ enabled: mobileEnabled.checked, width: mobileWidth.valueAsNumber, height: mobileHeight.valueAsNumber });
-    showMobileStatus(`Saved mobile viewport: ${settings.width} × ${settings.height} px. Applies to the next recording.`);
+    updateMobileOutput();
+    showMobileStatus(`Saved mobile layout: ${settings.width} × ${settings.height} px. Applies to the next recording.`);
   } catch (error) {
     showMobileStatus(`Could not save. ${error.message}`, true);
   } finally {

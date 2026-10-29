@@ -216,6 +216,15 @@ test("a rejected mobile metrics command rolls back and does not start capture", 
   assert.equal(h.sessionStorage.nativeMobileViewport, undefined);
 });
 
+test("failure to persist an attached mobile session still releases the debugger", async () => {
+  const h = await setup();
+  h.preferences[MOBILE_SETTINGS_KEY] = { enabled: true, width: 390, height: 844 };
+  chrome.storage.session.set = async () => { throw new Error("Storage unavailable"); };
+  await assert.rejects(h.toggleRecording({ id: 42, windowId: 9, url: "https://example.com" }), /Storage unavailable/);
+  assert.ok(h.calls.some(call => call.type === "DEBUG_DETACH"));
+  assert.equal(h.calls.some(call => call.type === "CAPTURE"), false);
+});
+
 test("a debugger disconnect saves the mobile recording instead of continuing at desktop size", async () => {
   const h = await setup({ phase: "recording", tabId: 42, sessionId: "recording", mobileSessionId: "mobile" }, true);
   h.sessionStorage.nativeMobileViewport = { tabId: 42, sessionId: "mobile" };

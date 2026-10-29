@@ -11,15 +11,85 @@
   <body>
     <main>
       <div class="brand"><img src="icons/record-32.png" width="28" height="28" alt="">Page Recorder</div>
-      <section class="card" aria-labelledby="heading">
+      <section class="card" aria-labelledby="output-heading">
+        <span class="eyebrow">DESKTOP &amp; MOBILE</span>
+        <h1 id="output-heading">Recording output</h1>
+        <p class="intro">Shared quality, frame rate, and recording controls for desktop and mobile. Changes save automatically and apply to your next recording.</p>
+        <fieldset id="output-fields" disabled>
+          <legend class="sr-only">Shared recording output settings</legend>
+          <label for="output-scale">Output quality
+            <select id="output-scale" aria-describedby="output-help">
+              <option value="1">1× · Standard</option>
+              <option value="2">2× · High resolution</option>
+              <option value="3" selected>3× · Highest resolution (recommended)</option>
+            </select>
+          </label>
+          <p class="help" id="output-help">Videos save as MP4. Scale multiplies the video’s width and height while keeping the page layout the same. At 3×, a 390 × 844 mobile viewport exports at 1170 × 2532. Exports can be at most 8,192 pixels per side. MP4 alignment can add one edge pixel to odd dimensions.</p>
+          <label for="output-fps">Frame rate
+            <select id="output-fps" aria-describedby="fps-help">
+              <option value="15">15 FPS · Lower processing load</option>
+              <option value="24">24 FPS</option>
+              <option value="25">25 FPS</option>
+              <option value="30">30 FPS · Balanced</option>
+              <option value="50">50 FPS</option>
+              <option value="60" selected>60 FPS · Smooth scrolling (recommended)</option>
+            </select>
+          </label>
+          <p class="help" id="fps-help">Higher FPS captures more motion and needs more processing power. Actual frame rate depends on the page, browser, and hardware.</p>
+          <div class="switch-row">
+            <label for="cursor-visible">Show cursor in recordings<span class="switch-hint">On keeps the cursor visible. Off hides it while recording.</span></label>
+            <input id="cursor-visible" class="mode-switch" type="checkbox" role="switch" checked>
+          </div>
+          <details class="advanced-settings">
+            <summary>More recording settings</summary>
+            <div class="scroll-dimensions">
+              <label for="output-bitrate-mode">Video bitrate
+                <select id="output-bitrate-mode" aria-describedby="bitrate-help">
+                  <option value="auto">Automatic (recommended)</option>
+                  <option value="custom">Custom Mbps</option>
+                </select>
+              </label>
+              <label for="output-bitrate-mbps">Custom bitrate
+                <span class="input-wrap"><input id="output-bitrate-mbps" type="number" min="1" max="200" step="1" value="30" disabled aria-describedby="bitrate-help"><span aria-hidden="true">Mbps</span></span>
+              </label>
+            </div>
+            <p class="help" id="bitrate-help">Automatic bitrate follows the video size and FPS. Custom bitrate accepts 1–200 Mbps; a higher target generally increases file size.</p>
+            <label for="output-codec">MP4 codec
+              <select id="output-codec" aria-describedby="codec-help">
+                <option value="auto">Auto · Choose a supported MP4 codec</option>
+                <option value="h264">H.264 · Broad playback compatibility</option>
+                <option value="hevc">H.265 / HEVC · Efficient high-resolution video</option>
+              </select>
+            </label>
+            <p class="help" id="codec-help">Auto can use H.264 or HEVC. Selecting a specific codec requires browser and hardware support. Every option saves MP4.</p>
+            <div class="scroll-dimensions">
+              <label for="output-start-delay">Start delay
+                <span class="input-wrap"><input id="output-start-delay" type="number" min="0" max="60" step="0.1" value="0" aria-describedby="timing-help"><span aria-hidden="true">seconds</span></span>
+              </label>
+              <label for="output-max-duration">Auto-stop after
+                <span class="input-wrap"><input id="output-max-duration" type="number" min="0" max="86400" step="1" value="0" aria-describedby="timing-help"><span aria-hidden="true">seconds</span></span>
+              </label>
+            </div>
+            <p class="help" id="timing-help">A 0-second delay starts immediately. Click the toolbar icon during a countdown to cancel. Auto-stop at 0 keeps recording until you stop it; any positive duration stops and saves automatically.</p>
+            <label for="output-filename-prefix">Filename prefix
+              <span class="input-wrap"><input id="output-filename-prefix" type="text" maxlength="64" value="recording" spellcheck="false" aria-describedby="filename-help"></span>
+            </label>
+            <p class="help" id="filename-help">A timestamp and .mp4 are added automatically. Files save in Downloads → Page Recorder.</p>
+            <p id="output-storage-estimate" class="help" role="status" aria-live="polite"></p>
+          </details>
+        </fieldset>
+        <p id="output-status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading output settings…</p>
+      </section>
+      <section class="card window-card" aria-labelledby="heading">
         <span class="eyebrow">RECORDING WINDOW</span>
-        <h1 id="heading">Recording window width</h1>
-        <p class="intro">Desktop recordings use this width and the full available height of your display. Mobile mode keeps the current browser window size.</p>
+        <h2 id="heading">Recording window width</h2>
+        <p class="intro">Desktop recordings use this width and the full available height of your display. Desktop videos use the shared output quality above. Mobile mode keeps the current browser window size.</p>
         <form id="width-form">
           <fieldset id="fields" disabled>
             <legend class="sr-only">Chrome window width in pixels</legend>
             <label for="width">Width <span class="input-wrap"><input id="width" name="width" type="number" min="100" max="16384" step="1" inputmode="numeric" required aria-describedby="width-help"><span aria-hidden="true">px</span></span></label>
             <div class="automatic-height"><span>Height</span><strong>Full available height · Automatic</strong></div>
+            <div class="automatic-height"><span>Video export</span><strong id="desktop-output-scale">3× resolution</strong></div>
             <p class="help" id="width-help">The window fills the usable height above your taskbar or Dock. Its width includes Chrome’s frame; your video captures the webpage inside.</p>
             <button type="submit">Save width</button>
           </fieldset>
@@ -41,8 +111,10 @@
               <label for="mobile-width">Viewport width<span class="input-wrap"><input id="mobile-width" type="number" min="100" max="4096" step="1" required aria-describedby="mobile-help"><span aria-hidden="true">px</span></span></label>
               <label for="mobile-height">Viewport height<span class="input-wrap"><input id="mobile-height" type="number" min="100" max="4096" step="1" required aria-describedby="mobile-help"><span aria-hidden="true">px</span></span></label>
             </div>
-            <p class="help" id="mobile-help">These are the page’s viewport and saved video dimensions. The default 390 × 844 has the same aspect ratio as 1170 × 2532. The preview scales up or down to fill the available tab space without stretching. Surrounding space is excluded from the video.</p>
-            <button type="submit">Save mobile dimensions</button>
+            <p class="help" id="mobile-help">These dimensions control the webpage layout. Keep 390 × 844 for the mobile layout; use the shared output quality above for a higher-resolution video. The preview scales up or down to fill the available tab space without stretching. Surrounding space is excluded from the video.</p>
+            <div class="automatic-height"><span>Saved video</span><strong id="mobile-output-resolution" role="status" aria-live="polite">1170 × 2532 px</strong></div>
+            <p class="help" id="mobile-export-help">A 390 × 844 viewport at 3× saves a 1170 × 2532 video. The shared output quality above applies to both mobile and desktop. Text and layout keep the same proportions.</p>
+            <button type="submit">Save mobile settings</button>
           </fieldset>
           <p id="mobile-status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading mobile settings…</p>
         </form>
@@ -83,7 +155,7 @@
           <p class="help">Shortcuts control the recorded tab while your browser is in front. In Arc, use In Arc scope and keep the webpage focused. Customize the keys if another application or extension uses them.</p>
         </div>
       </section>
-      <p class="footer">Keep using the toolbar icon to start and stop. Recordings hide the cursor. Mobile videos contain only the mobile viewport.</p>
+      <p class="footer">Keep using the toolbar icon to start and stop. MP4 data is written to disk during recording. Output quality and cursor visibility apply to both desktop and mobile. Mobile videos contain only the mobile viewport.</p>
     </main>
   </body>
 </html>
