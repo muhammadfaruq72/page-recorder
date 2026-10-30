@@ -1,4 +1,4 @@
-// Chrome serializes this function into the recorded tab's isolated world.
+// Chrome serializes this function into the active viewport tab's isolated world.
 // Keep every helper inside the function; page code cannot access this state.
 export function scrollPage(command) {
   const key = "__pageRecorderSmoothScroll";

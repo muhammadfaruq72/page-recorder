@@ -1,17 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Page Recorder",
-  "version": "1.14.0",
-  "description": "Click once to record the current webpage. Click again to stop and save the video.",
+  "name": "Page Viewport",
+  "version": "2.0.3",
+  "description": "Toggle left-aligned desktop or mobile viewports in fullscreen. Collect scroll points and move smoothly with keyboard shortcuts.",
   "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
-    "tabCapture",
-    "offscreen",
-    "downloads",
-    "unlimitedStorage",
     "storage",
-    "system.display",
     "scripting",
     "debugger"
   ],
@@ -21,21 +16,21 @@
         "default": "Ctrl+Shift+9",
         "mac": "Command+Shift+9"
       },
-      "description": "Scroll down by the saved viewport percentage while recording"
+      "description": "Scroll down by the saved viewport percentage in viewport mode"
     },
     "scroll-up": {
       "suggested_key": {
         "default": "Ctrl+Shift+8",
         "mac": "Command+Shift+8"
       },
-      "description": "Scroll down one full viewport height while recording"
+      "description": "Scroll down one full viewport height in viewport mode"
     },
     "scroll-next-point": {
       "suggested_key": {
         "default": "Ctrl+Shift+7",
         "mac": "Command+Shift+7"
       },
-      "description": "Scroll to the next saved page position while recording"
+      "description": "Scroll to the next saved page position in viewport mode"
     }
   },
   "options_ui": {
@@ -47,7 +42,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Page Recorder \u2014 click to record this tab",
+    "default_title": "Page Viewport \u2014 click for fullscreen viewport and scrolling",
     "default_icon": {
       "16": "icons/record-16.png",
       "32": "icons/record-32.png",

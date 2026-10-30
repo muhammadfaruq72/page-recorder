@@ -7,8 +7,7 @@ main { max-width: 580px; margin: 0 auto; }
 .eyebrow { color: #ba333c; font-size: 10px; font-weight: 750; letter-spacing: 1.3px; }
 h1 { margin: 14px 0 12px; font-size: 29px; line-height: 1.2; letter-spacing: -.8px; }
 h2 { margin: 14px 0 12px; font-size: 26px; line-height: 1.2; letter-spacing: -.6px; }
-.scroll-card, .mobile-card, .window-card { margin-top: 24px; }
-.mobile-note { margin-bottom: 0; }
+.scroll-card, .mobile-card { margin-top: 24px; }
 .intro, .help, .footer { color: #657083; line-height: 1.65; }
 .intro { margin: 0 0 30px; font-size: 15px; }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
@@ -17,8 +16,6 @@ label { display: block; min-width: 0; font-size: 13px; font-weight: 600; }
 .input-wrap:focus-within { border-color: #c73340; outline: 3px solid #dc263015; }
 input { width: 100%; min-width: 0; padding: 14px 0; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; font-size: 20px; font-weight: 600; line-height: 1.3; }
 .input-wrap > span { padding-left: 6px; color: #8992a1; font-size: 12px; font-weight: 400; }
-.automatic-height { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 16px; color: #657083; font-size: 12px; }
-.automatic-height strong { color: #307050; font-weight: 500; }
 .help { margin: 16px 0 26px; font-size: 12px; }
 button { padding: 13px 20px; border: 0; border-radius: 9px; background: #dc2630; color: #fff; font: 600 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; cursor: pointer; }
 button:hover { background: #c31d27; }
@@ -55,8 +52,6 @@ button.secondary:hover { background: #f4f5f7; }
   .eyebrow { color: #ff8790; }
   .input-wrap { background: #141923; border-color: #3d4758; }
   .status { color: #8bdbaf; }
-  .automatic-height { color: #a2adbd; }
-  .automatic-height strong { color: #8bdbaf; }
   .status[data-error="true"] { color: #ffa49c; }
   .switch-row, .shortcuts { border-color: #2c3544; }
   .switch-hint { color: #a2adbd; }
@@ -66,14 +61,6 @@ button.secondary:hover { background: #f4f5f7; }
   button.secondary:hover { background: #242c3a; }
 }
 
-.advanced-settings { margin-top: 20px; padding-top: 18px; border-top: 1px solid #e2e5eb; }
-.advanced-settings summary { cursor: pointer; font-size: 13px; font-weight: 650; }
-.advanced-settings summary:focus-visible { outline: 3px solid #dc263055; outline-offset: 5px; border-radius: 4px; }
-.advanced-settings[open] > summary { margin-bottom: 18px; }
-.advanced-settings > label { margin-top: 18px; }
-.advanced-settings .help:last-child { margin-bottom: 0; }
-#output-bitrate-mbps:disabled { opacity: .55; }
 .points-list { margin-bottom: 18px; font-size: 13px; line-height: 1.6; }
 .points-list p { overflow-wrap: anywhere; margin-bottom: 6px; font-weight: 600; }
 .points-list ol { margin-top: 0; padding-left: 24px; max-height: 240px; overflow: auto; }
-@media (prefers-color-scheme: dark) { .advanced-settings { border-color: #2c3544; } }

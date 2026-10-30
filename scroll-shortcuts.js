@@ -1,6 +1,6 @@
-// Installed only in the recorded tab's isolated world. Arc can deliver a key
+// Installed only in the active viewport tab's isolated world. Arc can deliver a key
 // to the page without firing chrome.commands.onCommand.
-export function recordingShortcuts(config) {
+export function scrollShortcuts(config) {
   const key = "__pageRecorderShortcuts";
   globalThis[key]?.remove();
   if (config.action === "remove") return;
@@ -29,8 +29,13 @@ export function recordingShortcuts(config) {
   }
   function remove() {
     window.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("fullscreenchange", onFullscreenChange, true);
     window.removeEventListener("pagehide", remove);
     if (globalThis[key]?.remove === remove) delete globalThis[key];
+  }
+  function onFullscreenChange() {
+    if (document.fullscreenElement) return;
+    chrome.runtime.sendMessage({ target: "background", type: "VIEWPORT_FULLSCREEN_EXIT", sessionId: config.sessionId }).catch(remove);
   }
   function onKey(event) {
     if (!event.isTrusted || event.repeat || event.isComposing || !document.hasFocus()) return;
@@ -44,5 +49,9 @@ export function recordingShortcuts(config) {
   }
   globalThis[key] = { sessionId: config.sessionId, remove };
   window.addEventListener("keydown", onKey, true);
+  if (config.documentFullscreen) {
+    window.addEventListener("fullscreenchange", onFullscreenChange, true);
+    onFullscreenChange();
+  }
   window.addEventListener("pagehide", remove, { once: true });
 }

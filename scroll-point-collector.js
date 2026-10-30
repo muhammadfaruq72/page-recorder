@@ -17,12 +17,12 @@
   async function refresh() {
     const current = ++revision;
     try {
-      const [local, session] = await Promise.all([
+      const [local, state] = await Promise.all([
         chrome.storage.local.get("collectScrollPoints"),
         chrome.runtime.sendMessage({ target: "background", type: "POINT_COLLECTION_STATE" }),
       ]);
       if (removed || current !== revision) return;
-      if (!local.collectScrollPoints || session?.suspended) {
+      if (!local.collectScrollPoints || state?.suspended) {
         host?.remove(); host = undefined; return;
       }
       if (host?.isConnected) return;

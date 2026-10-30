@@ -122,7 +122,7 @@ test("cancelling stops immediately, drops queued steps, and restores original pa
   assert.equal(h.root.style.getPropertyValue("overflow-anchor"), "");
 });
 
-test("an old recording's stop message cannot cancel a newer recording's animation", () => {
+test("an old viewport session's stop message cannot cancel a newer viewport session's animation", () => {
   const h = setup();
   h.step(1, DEFAULT_SCROLL_SETTINGS, "new");
   h.cancel("old");

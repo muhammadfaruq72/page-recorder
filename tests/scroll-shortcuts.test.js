@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
-import { recordingShortcuts } from "../recording-shortcuts.js";
+import { scrollShortcuts } from "../scroll-shortcuts.js";
 
 function setup(shortcut = "⌃⌘Z") {
   const listeners = new Map();
@@ -14,7 +14,7 @@ function setup(shortcut = "⌃⌘Z") {
     document: { hasFocus: () => true },
     chrome: { runtime: { sendMessage: async message => { messages.push(structuredClone(message)); return { ok: true }; } } },
   });
-  const run = config => vm.runInContext(`(${recordingShortcuts.toString()})(${JSON.stringify(config)})`, context);
+  const run = config => vm.runInContext(`(${scrollShortcuts.toString()})(${JSON.stringify(config)})`, context);
   run({ action: "install", sessionId: "one", commands: [{ name: "scroll-down", shortcut }] });
   const press = (changes = {}) => {
     const event = { key: "z", code: "KeyZ", isTrusted: true, ctrlKey: true, metaKey: true, altKey: false, shiftKey: false,
@@ -58,5 +58,17 @@ test("reinstallation replaces the old binding and removal restores page keyboard
   h.run({ action: "remove" });
   h.press({ key: "x" });
   assert.equal(h.messages.length, 1);
+  assert.equal(h.listeners.size, 0);
+});
+
+test("page-fullscreen exit is reported and the fullscreen listener is removed on cleanup", () => {
+  const h = setup();
+  h.context.document.fullscreenElement = {};
+  h.run({ action: "install", sessionId: "full", commands: [], documentFullscreen: true });
+  assert.equal(h.messages.length, 0);
+  h.context.document.fullscreenElement = null;
+  h.listeners.get("fullscreenchange")();
+  assert.deepEqual(h.messages, [{ target: "background", type: "VIEWPORT_FULLSCREEN_EXIT", sessionId: "full" }]);
+  h.run({ action: "remove" });
   assert.equal(h.listeners.size, 0);
 });

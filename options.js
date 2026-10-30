@@ -1,218 +1,78 @@
-import { loadWindowWidth, saveWindowWidth, validateWindowWidth, loadScrollSettings, saveScrollSettings, loadMobileSettings, saveMobileSettings, loadOutputSettings, saveOutputSettings, DEFAULT_OUTPUT_SETTINGS, scaledOutputSize, recordingBitrate, COLLECT_POINTS_KEY, SCROLL_POINTS_KEY } from "./settings.js";
+import { loadDesktopSettings, saveDesktopSettings, loadScrollSettings, saveScrollSettings, loadMobileSettings, saveMobileSettings, COLLECT_POINTS_KEY, SCROLL_POINTS_KEY } from "./settings.js";
 
-const form = document.querySelector("#width-form");
-const fields = document.querySelector("#fields");
-const widthInput = document.querySelector("#width");
-const status = document.querySelector("#status");
-
-function showStatus(text, error = false) {
-  status.textContent = text;
-  status.dataset.error = String(error);
+function statusMessage(element, text, error = false) {
+  element.textContent = text;
+  element.dataset.error = String(error);
 }
-
-async function initialize() {
-  try {
-    const saved = await loadWindowWidth();
-    const width = saved ?? validateWindowWidth((await chrome.windows.getCurrent()).width);
-    widthInput.value = width;
-    showStatus(saved != null
-      ? `Saved width: ${width} px. Height is automatic.`
-      : "Save a width here, or your first recording will remember the current window width.");
-    fields.disabled = false;
-  } catch (error) {
-    showStatus(`Could not load your window width. ${error.message}`, true);
-  }
-}
-
-form.addEventListener("submit", async event => {
-  event.preventDefault();
-  fields.disabled = true;
-  try {
-    const width = await saveWindowWidth(widthInput.valueAsNumber);
-    showStatus(`Saved width: ${width} px. Height is automatic.`);
-  } catch (error) {
-    showStatus(`Could not save. ${error.message}`, true);
-  } finally {
-    fields.disabled = false;
-  }
-});
-
-void initialize();
-
+const desktopForm = document.querySelector("#desktop-form");
+const desktopFields = document.querySelector("#desktop-fields");
+const desktopWidth = document.querySelector("#desktop-width");
+const desktopHeight = document.querySelector("#desktop-height");
+const desktopStatus = document.querySelector("#desktop-status");
 const mobileForm = document.querySelector("#mobile-form");
 const mobileEnabled = document.querySelector("#mobile-enabled");
 const mobileFields = document.querySelector("#mobile-fields");
 const mobileWidth = document.querySelector("#mobile-width");
 const mobileHeight = document.querySelector("#mobile-height");
 const mobileStatus = document.querySelector("#mobile-status");
-const outputFields = document.querySelector("#output-fields");
-const outputScale = document.querySelector("#output-scale");
-const cursorVisible = document.querySelector("#cursor-visible");
-const outputStatus = document.querySelector("#output-status");
-const outputFps = document.querySelector("#output-fps");
-const bitrateMode = document.querySelector("#output-bitrate-mode");
-const bitrateMbps = document.querySelector("#output-bitrate-mbps");
-const outputCodec = document.querySelector("#output-codec");
-const startDelay = document.querySelector("#output-start-delay");
-const maxDuration = document.querySelector("#output-max-duration");
-const filenamePrefix = document.querySelector("#output-filename-prefix");
-const storageEstimate = document.querySelector("#output-storage-estimate");
-let outputSettings = { ...DEFAULT_OUTPUT_SETTINGS };
-const mobileOutputResolution = document.querySelector("#mobile-output-resolution");
-
-function updateStorageEstimate() {
-  const storage = bps => `${Math.round(bps * 60 / 8_000_000)} MB/min`;
-  if (outputSettings.bitrateMode === "custom") {
-    storageEstimate.textContent = `Target bitrate: ${outputSettings.bitrateMbps} Mbps · approximately ${storage(outputSettings.bitrateMbps * 1_000_000)}.`;
-    return;
-  }
-  if (mobileEnabled.checked) {
-    try {
-      const size = scaledOutputSize(mobileWidth.valueAsNumber, mobileHeight.valueAsNumber, outputSettings.exportScale);
-      const bps = recordingBitrate(size.outputWidth, size.outputHeight, outputSettings);
-      storageEstimate.textContent = `Current mobile target: ${(bps / 1_000_000).toFixed(1)} Mbps · approximately ${storage(bps)}. Actual file size varies with the page.`;
-      return;
-    } catch { /* Wait for valid mobile dimensions. */ }
-  }
-  const base = 30_000_000 * outputSettings.frameRate / 60;
-  storageEstimate.textContent = `Automatic bitrate: ${(base / 1_000_000).toFixed(1)}–120 Mbps (${storage(base)}–900 MB/min), depending on the final viewport. Actual file size varies.`;
+function desktopSummary(settings) {
+  return `${settings.width} px wide × ${settings.height ? `${settings.height} px high` : "automatic fullscreen height"}. Applies the next time you turn on the viewport.`;
 }
-
-function updateMobileOutput() {
-  const width = mobileWidth.valueAsNumber;
-  const height = mobileHeight.valueAsNumber;
-  const scale = outputSettings.exportScale;
+async function initializeDimensions() {
   try {
-    const size = scaledOutputSize(width, height, scale);
-    mobileOutputResolution.textContent = `${size.outputWidth} × ${size.outputHeight} px · MP4`;
-  } catch (error) {
-    mobileOutputResolution.textContent = Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0
-      ? error.message : "Enter viewport dimensions";
-  }
-  updateStorageEstimate();
-}
-
-for (const input of [mobileWidth, mobileHeight]) input.addEventListener("input", updateMobileOutput);
-
-function showOutputStatus(text, error = false) {
-  outputStatus.textContent = text;
-  outputStatus.dataset.error = String(error);
-}
-
-function renderOutputSettings() {
-  outputScale.value = String(outputSettings.exportScale);
-  cursorVisible.checked = outputSettings.cursorVisible;
-  outputFps.value = String(outputSettings.frameRate);
-  bitrateMode.value = outputSettings.bitrateMode;
-  bitrateMbps.value = outputSettings.bitrateMbps;
-  bitrateMbps.disabled = outputSettings.bitrateMode !== "custom";
-  outputCodec.value = outputSettings.codec;
-  startDelay.value = outputSettings.startDelayMs / 1000;
-  maxDuration.value = outputSettings.maxDurationSeconds;
-  filenamePrefix.value = outputSettings.filenamePrefix;
-  document.querySelector("#desktop-output-scale").textContent = `${outputSettings.exportScale}× resolution`;
-  updateMobileOutput();
-}
-
-function outputSummary() {
-  const codec = { auto: "Auto codec", h264: "H.264", hevc: "HEVC" }[outputSettings.codec];
-  const bitrate = outputSettings.bitrateMode === "custom" ? `${outputSettings.bitrateMbps} Mbps` : "Auto bitrate";
-  return `${outputSettings.exportScale}× · ${outputSettings.frameRate} FPS · ${bitrate} · ${codec} · Cursor ${outputSettings.cursorVisible ? "visible" : "hidden"}`;
-}
-
-async function initializeOutput() {
-  try {
-    outputSettings = await loadOutputSettings();
-    renderOutputSettings();
-    outputFields.disabled = false;
-    showOutputStatus(`${outputSummary()}. Applies to both modes on your next recording.`);
-  } catch (error) {
-    showOutputStatus(`Could not load output settings. ${error.message}`, true);
-  }
-}
-const outputReady = initializeOutput();
-
-async function saveSharedOutput() {
-  outputFields.disabled = true;
-  try {
-    outputSettings = await saveOutputSettings({
-      exportScale: Number(outputScale.value), cursorVisible: cursorVisible.checked,
-      frameRate: Number(outputFps.value), bitrateMode: bitrateMode.value,
-      bitrateMbps: bitrateMbps.valueAsNumber, codec: outputCodec.value,
-      startDelayMs: Math.round(startDelay.valueAsNumber * 1000),
-      maxDurationSeconds: maxDuration.valueAsNumber, filenamePrefix: filenamePrefix.value,
-    });
-    renderOutputSettings();
-    showOutputStatus(`Saved. ${outputSummary()}. Applies to both modes on your next recording.`);
-  } catch (error) {
-    renderOutputSettings();
-    showOutputStatus(`Could not save output settings. ${error.message}`, true);
-  } finally {
-    outputFields.disabled = false;
-  }
-}
-for (const input of [outputScale, cursorVisible, outputFps, bitrateMode, bitrateMbps, outputCodec, startDelay, maxDuration, filenamePrefix]) {
-  input.addEventListener("change", saveSharedOutput);
-}
-
-function showMobileStatus(text, error = false) {
-  mobileStatus.textContent = text;
-  mobileStatus.dataset.error = String(error);
-}
-
-async function initializeMobile() {
-  try {
-    await outputReady;
-    const settings = await loadMobileSettings();
-    mobileEnabled.checked = settings.enabled;
-    mobileWidth.value = settings.width;
-    mobileHeight.value = settings.height;
-    updateMobileOutput();
+    const desktop = await loadDesktopSettings();
+    desktopWidth.value = desktop.width;
+    desktopHeight.value = desktop.height;
+    desktopFields.disabled = false;
+    statusMessage(desktopStatus, desktopSummary(desktop));
+    const mobile = await loadMobileSettings();
+    mobileEnabled.checked = mobile.enabled;
+    mobileWidth.value = mobile.width;
+    mobileHeight.value = mobile.height;
     mobileEnabled.disabled = false;
-    mobileFields.disabled = !settings.enabled;
-    showMobileStatus(settings.enabled
-      ? `Saved mobile layout: ${settings.width} × ${settings.height} px. Applies to the next recording.`
-      : "Mobile mode is off. Recordings use your desktop window settings.");
-  } catch (error) {
-    showMobileStatus(`Could not load mobile mode. ${error.message}`, true);
-  }
+    mobileFields.disabled = !mobile.enabled;
+    statusMessage(mobileStatus, mobile.enabled ? "Mobile mode selected for the next activation." : "Desktop mode selected for the next activation.");
+  } catch (error) { statusMessage(desktopStatus, error.message, true); }
 }
-
-mobileEnabled.addEventListener("change", async () => {
-  const enabled = mobileEnabled.checked;
-  mobileEnabled.disabled = true;
-  mobileFields.disabled = true;
+desktopForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  desktopFields.disabled = true;
   try {
-    await saveMobileSettings({ ...await loadMobileSettings(), enabled });
-    showMobileStatus(enabled
-      ? "Mobile mode enabled for the next recording. Save any dimension changes below."
-      : "Mobile mode disabled for the next recording.");
-  } catch (error) {
-    mobileEnabled.checked = !enabled;
-    showMobileStatus(`Could not change mobile mode. ${error.message}`, true);
-  } finally {
-    mobileEnabled.disabled = false;
-    mobileFields.disabled = !mobileEnabled.checked;
-    updateMobileOutput();
-  }
+    const saved = await saveDesktopSettings({ width: desktopWidth.valueAsNumber, height: desktopHeight.valueAsNumber });
+    statusMessage(desktopStatus, `Saved. ${desktopSummary(saved)}`);
+  } catch (error) { statusMessage(desktopStatus, error.message, true); }
+  finally { desktopFields.disabled = false; }
 });
-
+mobileEnabled.addEventListener("change", async () => {
+  mobileEnabled.disabled = true;
+  try {
+    const saved = await saveMobileSettings({ ...await loadMobileSettings(), enabled: mobileEnabled.checked });
+    statusMessage(mobileStatus, `${saved.enabled ? "Mobile" : "Desktop"} mode selected for the next activation. Save any dimension changes below.`);
+  } catch (error) {
+    mobileEnabled.checked = !mobileEnabled.checked;
+    statusMessage(mobileStatus, error.message, true);
+  } finally { mobileEnabled.disabled = false; mobileFields.disabled = !mobileEnabled.checked; }
+});
 mobileForm.addEventListener("submit", async event => {
   event.preventDefault();
   mobileEnabled.disabled = true;
   mobileFields.disabled = true;
   try {
-    const settings = await saveMobileSettings({ enabled: mobileEnabled.checked, width: mobileWidth.valueAsNumber, height: mobileHeight.valueAsNumber });
-    updateMobileOutput();
-    showMobileStatus(`Saved mobile layout: ${settings.width} × ${settings.height} px. Applies to the next recording.`);
-  } catch (error) {
-    showMobileStatus(`Could not save. ${error.message}`, true);
-  } finally {
-    mobileEnabled.disabled = false;
-    mobileFields.disabled = !mobileEnabled.checked;
-  }
+    const saved = await saveMobileSettings({ enabled: mobileEnabled.checked, width: mobileWidth.valueAsNumber, height: mobileHeight.valueAsNumber });
+    statusMessage(mobileStatus, `Saved ${saved.width} × ${saved.height} CSS px. Applies on the next activation.`);
+  } catch (error) { statusMessage(mobileStatus, error.message, true); }
+  finally { mobileEnabled.disabled = false; mobileFields.disabled = !mobileEnabled.checked; }
 });
-void initializeMobile();
+void initializeDimensions();
+async function refreshViewportStatus() {
+  try {
+    const element = document.querySelector("#viewport-status");
+    statusMessage(element, await chrome.action.getTitle({}), await chrome.action.getBadgeText({}) === "!");
+  } catch { /* The extension may be reloading. */ }
+}
+window.addEventListener("focus", () => { void refreshViewportStatus(); });
+chrome.storage.onChanged.addListener((changes, area) => { if (area === "session" && changes.viewportSession) void refreshViewportStatus(); });
+void refreshViewportStatus();
 
 const scrollForm = document.querySelector("#scroll-form");
 const scrollFields = document.querySelector("#scroll-fields");
@@ -235,8 +95,8 @@ async function initializeScrolling() {
     scrollDuration.value = settings.durationMs / 1000;
     scrollPercent.value = settings.stepPercent;
     scrollEnabled.disabled = false;
-    scrollFields.disabled = !settings.enabled;
-    showScrollStatus(settings.enabled ? "Scroll shortcuts are enabled." : "Turn on the switch to use scroll shortcuts while recording.");
+    scrollFields.disabled = false;
+    showScrollStatus(settings.enabled ? "Scroll shortcuts are enabled." : "Turn on the switch to use scroll shortcuts while viewport mode is on.");
   } catch (error) {
     showScrollStatus(`Could not load scrolling settings. ${error.message}`, true);
   }
@@ -255,7 +115,7 @@ scrollEnabled.addEventListener("change", async () => {
     showScrollStatus(`Could not change the scrolling switch. ${error.message}`, true);
   } finally {
     scrollEnabled.disabled = false;
-    scrollFields.disabled = !scrollEnabled.checked;
+    scrollFields.disabled = false;
   }
 });
 
@@ -275,7 +135,7 @@ scrollForm.addEventListener("submit", async event => {
     showScrollStatus(`Could not save scrolling settings. ${error.message}`, true);
   } finally {
     scrollEnabled.disabled = false;
-    scrollFields.disabled = !scrollEnabled.checked;
+    scrollFields.disabled = false;
   }
 });
 
@@ -296,33 +156,6 @@ document.querySelector("#change-shortcuts").addEventListener("click", () => {
 window.addEventListener("focus", () => { void loadShortcuts(); });
 void initializeScrolling();
 void loadShortcuts();
-
-async function refreshRecorderStatus() {
-  // Hidden settings tabs must not keep polling the recording renderer.
-  if (document.visibilityState === "hidden") return;
-  const element = document.querySelector("#recorder-status");
-  try {
-    const title = await chrome.action.getTitle({});
-    element.textContent = title;
-    element.dataset.error = String(await chrome.action.getBadgeText({}) === "!");
-    const contexts = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
-    if (contexts.length) {
-      const response = await chrome.runtime.sendMessage({ target: "recorder", type: "STATUS" });
-      const size = response?.status?.settings;
-      const perf = response?.status?.performance;
-      if (size?.width) element.textContent += ` Video: ${size.width} × ${size.height}, target ${perf?.targetFps || size.frameRate || outputSettings.frameRate} FPS.`;
-      if (response?.status?.mimeType) element.textContent += ` ${/hvc1|hev1/.test(response.status.mimeType) ? "HEVC" : /avc1|avc3/.test(response.status.mimeType) ? "H.264" : "MP4"}.`;
-      if (perf?.path) element.textContent += ` ${perf.path}.`;
-      if (response?.status?.phase === "recording" && Number.isFinite(perf?.sourceFps)) {
-        element.textContent += ` Recent capture: ${perf.sourceFps.toFixed(0)} FPS; forwarded: ${perf.outputFps.toFixed(0)} FPS.`;
-      }
-      if (Number.isFinite(perf?.received)) element.textContent += ` Frames received: ${perf.received}; forwarded: ${perf.forwarded}.`;
-    }
-  } catch (error) { element.textContent = error.message; }
-}
-void refreshRecorderStatus();
-setInterval(refreshRecorderStatus, 1500);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) void refreshRecorderStatus(); });
 
 const collectPoints = document.querySelector("#points-collect");
 const clearPoints = document.querySelector("#points-clear");
@@ -360,7 +193,7 @@ collectPoints.addEventListener("change", async () => {
       throw new Error("Website access is required to show the collection button. Collection remains off.");
     }
     await chrome.storage.local.set({ [COLLECT_POINTS_KEY]: enabled });
-    pointStatus(enabled ? "Collection is on. Open your webpage and click Save scroll point at each position." : "Collection is off. Saved points are ready for recording.");
+    pointStatus(enabled ? "Collection is on. Open your webpage and click Save scroll point at each position." : "Collection is off. Saved points are ready to use.");
   } catch (error) {
     pointStatus(error.message, true);
   } finally {
@@ -384,5 +217,5 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 void renderPoints().then(() => {
   collectPoints.disabled = false;
-  pointStatus("Points play in collection order with the next-point shortcut during recording.");
+  pointStatus("Points play in collection order with the next-point shortcut while viewport mode is on.");
 }).catch(error => pointStatus(error.message, true));
