@@ -1,6 +1,6 @@
 # Page Viewport
 
-One toolbar toggle for fullscreen desktop or mobile webpage viewports, plus scroll-point collection and smooth keyboard scrolling. Version 2 removes video recording and all recording settings. Version 2.0.1 handles delayed or ignored fullscreen window requests.
+Fullscreen desktop or mobile webpage viewports, scroll-point collection and smooth keyboard scrolling. Click the extension icon to open the four controls. Version 2.1 adds the popup and website controls; video recording remains removed.
 
 ## Install or update
 
@@ -8,33 +8,33 @@ Open `chrome://extensions` (or `arc://extensions`), enable Developer mode, and u
 
 The package command creates `dist/page-recorder.zip` for compatibility with the previous package name. Unzip it before loading. No dependencies, account, build step, or server are required. Chrome 116+ and compatible Chromium browsers are supported.
 
-## Fullscreen viewport toggle
+## Extension popup and fullscreen
 
 1. Open a regular webpage.
-2. Click the toolbar button. The browser enters fullscreen and the original tab receives the selected desktop or mobile viewport, anchored at the upper-left. The badge shows **ON**.
-3. Use the scrolling shortcuts or interact with the page normally.
-4. Click the same button again, including from another tab, to remove emulation and exit fullscreen. A previously maximized window returns to maximized; other windows return to normal. No width, height, or position is assigned to the browser window.
+2. Click the extension icon to open its popup. It contains **Fullscreen view**, **Mobile mode**, **Collect scroll points**, and **Clear points**. The first three are switches; Clear points is a one-click action for the current page.
+3. Turn on **Fullscreen view**. The browser enters fullscreen, with the original tab at the saved dimensions and aligned left. The badge shows **ON**. Use the scrolling shortcuts or interact with the page normally.
+4. Reopen the popup and turn **Fullscreen view** off, including from another tab, to remove emulation and exit fullscreen. A previously maximized window returns to maximized; other windows return to normal. No width, height, or position is assigned to the browser window.
 
-If you manually exit fullscreen, close the active tab, cancel the debugging connection, or navigate to another website origin, viewport mode ends and page cleanup runs. Same-origin navigation is supported. Only one viewport session runs at a time. Browser service-worker suspension does not discard its state. Fullscreen entry waits for the window transition. If the browser ignores or rejects that request, the extension uses the page’s Fullscreen API. In that fallback, Escape or navigating away ends viewport mode; the browser’s reported window state is not used as proof that the page left fullscreen.
+If you manually exit fullscreen, close the active tab, cancel the debugging connection, or navigate to another website origin, viewport mode ends and page cleanup runs. Same-origin navigation is supported. Only one viewport session runs at a time. When one is active, the popup controls that session and shows its page URL. Browser service-worker suspension does not discard its state. Fullscreen entry waits for the window transition. If the browser ignores or rejects that request, the extension uses the page’s Fullscreen API. In that fallback, Escape or navigating away ends viewport mode; the browser’s reported window state is not used as proof that the page left fullscreen.
 
-Both modes use the page's native render surface, with no iframe and no Inspect window. Sites that reject embedding continue to work. The configured CSS layout stays at its requested dimensions; the preview scales proportionally to fit the fullscreen area. Unused space remains to the right or below, with its appearance controlled by the browser.
+Both modes use the page's native render surface, with no iframe and no Inspect window. Sites that reject embedding continue to work. The configured CSS layout stays at its requested dimensions. Both modes scale the preview to fill the entire available fullscreen height and derive its width from the saved aspect ratio. If the result is wider than the screen, the right edge is clipped instead of reducing the height. The webpage controls stay inside the visible part. Unused space remains to the right or below, with its appearance controlled by the browser.
 
 ## Dimensions
 
 Right-click the toolbar icon and open **Options**.
 
-- **Desktop viewport:** width defaults to 1280 CSS pixels, or your previously saved width. Height **0** uses the available fullscreen height. Set a fixed height if you want a particular aspect ratio. Dimensions can be 100–16,384 px (or height 0).
+- **Desktop viewport:** default **1920 × 1080 CSS pixels (16:9)**. Width and height define the layout and aspect ratio, just like mobile. Each dimension can be 100–16,384 px. **Use default · 1920 × 1080** restores and saves the default pair. Older automatic-height settings keep their saved width and receive a reference height derived from 16:9; existing positive dimensions are preserved.
 - **Mobile viewport:** enable Mobile mode and set width and height. Existing dimensions are preserved; the default is **390 × 844 CSS pixels**. Each dimension can be 100–4,096 px. Mobile mode enables touch emulation and retains the browser's user agent.
 
-The mobile switch chooses the mode for the next activation. Dimension changes also apply on the next activation. The extension fits the entire configured viewport and keeps it aligned left in either mode. Desktop height 0 tracks the available fullscreen area.
+The popup’s **Mobile mode** switch changes the active fullscreen viewport immediately without exiting fullscreen or reloading the page. With fullscreen off, it selects the mode for the next activation. The website mode button does the same. Switching modes cancels pending scrolling and restarts point playback at the first saved point. Dimension edits in Options apply on the next activation or when switching into that mode. Both previews fill the available fullscreen height, with one uniform scale factor for width and height, and stay aligned left. For example, a 1920 × 1080 desktop layout shown at 900 px high has a projected width of 1600 px. Physical surface sizes are rounded to whole pixels without stretching the page; an over-wide preview is clipped at the browser’s right edge.
 
-Native emulation uses the `debugger` permission in both modes. Chrome/Arc may show a debugging banner. Close Inspect or another debugger on the selected tab before activating. Older Arc versions can retain the narrow page surface after disconnection; cleanup briefly reconnects to restore it and immediately detaches. If another debugger blocks cleanup, close it and click the toolbar button to retry. Protected browser pages and the Chrome Web Store cannot be controlled. Local files require **Allow access to file URLs** in extension settings.
+Native emulation uses the `debugger` permission in both modes. Chrome/Arc may show a debugging banner. Close Inspect or another debugger on the selected tab before activating. Older Arc versions can retain the narrow page surface after disconnection; cleanup briefly reconnects to restore it and immediately detaches. If another debugger blocks cleanup, close it and use the popup’s Fullscreen view switch to retry. Protected browser pages and the Chrome Web Store cannot be controlled. Local files require **Allow access to file URLs** in extension settings.
 
 ## Scroll points
 
-Enable **Collect scroll points** in Options and allow the optional HTTP/HTTPS website permission. A **Save scroll point** button appears on websites. Collect your positions before activating viewport mode. Switching on immediately removes any already-injected collection button before fullscreen starts. It stays hidden on the active viewport tab and returns after toggle-off, or a failed activation, if collection is still enabled. Saved points and scrolling shortcuts continue working while the button is hidden.
+Enable **Collect scroll points** in the popup or Options and allow the optional HTTP/HTTPS website permission. A compact panel appears on the webpage with **Save scroll point**, **Clear points**, and a **desktop/mobile** button. It stays visible while collection is on, including in fullscreen and mobile view. Turning collection off removes the panel without deleting points.
 
-Scroll to each position and click **Save scroll point**. Positions are saved in collection order, grouped by the full page URL without its fragment. **Clear all points** removes all saved positions. Turning collection off removes the button and keeps your saved list.
+Collect using the layout you plan to scroll. Save records the document’s current vertical position in collection order, grouped by URL without its fragment. The page’s Clear points button and popup Clear points action remove positions for that page only and stop its pending scrolling. **Clear all points** in Options still removes every saved list. The mode button switches an active viewport immediately, or selects the next fullscreen mode when inactive. A button on another tab cannot change the active viewport’s mode.
 
 With viewport mode on, press the **next saved scroll point** shortcut for each smooth move. A new activation starts at the first point. Additional presses queue separate moves; after the final point they do nothing. The next-point shortcut works independently of the percentage/full-height switch. It uses the same animation transition and duration. Positions are document/body scroll offsets; positions beyond the current bottom are clamped. Nested panels use the percentage/full-height shortcuts instead.
 
@@ -60,7 +60,7 @@ Keep the browser in front. In Arc, use **In Arc** scope and focus the webpage. T
 | `storage` | Save dimensions, scrolling settings, points and the active viewport session locally. |
 | `scripting` | Install keyboard handling, animate scrolling and display point collection. |
 | `debugger` | Apply and restore native page dimensions in both modes. |
-| Optional HTTP/HTTPS access | Display the collection button when its setting is enabled. |
+| Optional HTTP/HTTPS access | Display the website controls when collection is enabled. |
 
 There is no video capture, encoding, download worker, offscreen document, cursor-hiding setting, FPS, bitrate, export scale, or recording timer. Capture, downloads, unlimited-storage, and system-display permissions have been removed. Everything stays on your computer, with no uploads or analytics.
 

@@ -1,0 +1,31 @@
+:root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f5f7; color: #172033; }
+* { box-sizing: border-box; }
+body { width: 350px; margin: 0; padding: 22px; font-size: 13px; }
+header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+h1 { margin: 0; font-size: 17px; }
+fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 0; border-top: 1px solid #dce1e8; font-weight: 600; cursor: pointer; }
+small { display: block; margin-top: 5px; color: #657083; font-size: 11px; font-weight: 400; line-height: 1.5; }
+input { appearance: none; position: relative; flex: 0 0 42px; width: 42px; height: 24px; border: 0; border-radius: 16px; background: #bdc4cf; cursor: pointer; }
+input::after { content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 4px #0002; transition: transform .15s; }
+input:checked { background: #dc2630; }
+input:checked::after { transform: translateX(18px); }
+input:focus-visible, button:focus-visible { outline: 3px solid #dc263066; outline-offset: 3px; }
+.clear-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid #dce1e8; padding-top: 17px; }
+button { border: 1px solid #cfd5de; border-radius: 8px; padding: 9px 12px; color: inherit; background: transparent; font: inherit; font-weight: 600; cursor: pointer; }
+button:hover { background: #e7ebf2; }
+:disabled { cursor: default; opacity: .55; }
+#page-url { color: #657083; font-size: 11px; overflow-wrap: anywhere; margin: 14px 0 0; }
+#status { min-height: 34px; color: #307050; font-size: 12px; line-height: 1.5; margin: 12px 0; }
+#status[data-error="true"] { color: #b42318; }
+button.link { border: 0; padding: 0; color: #657083; font-size: 12px; background: transparent; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+@media (prefers-color-scheme: dark) {
+  :root { color: #e7ebf2; background: #171d27; }
+  .row, .clear-row { border-color: #354052; }
+  small, #page-url, button.link { color: #a2adbd; }
+  button { border-color: #465369; }
+  button:hover { background: #242c3a; }
+  #status { color: #8bdbaf; }
+  #status[data-error="true"] { color: #ffa49c; }
+}

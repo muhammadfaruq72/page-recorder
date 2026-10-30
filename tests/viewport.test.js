@@ -5,7 +5,7 @@ import { fittedViewport, startViewport, closeViewport, refreshViewport, restoreP
 
 test("fixed desktop and mobile dimensions preserve aspect ratio at any screen size", () => {
   const session = { settings: { width: 1600, height: 900 }, fullscreenInsets: { width: 0, height: 0 } };
-  assert.deepEqual(fittedViewport(session, { width: 1280, height: 1024 }), { width: 1600, height: 900, scale: .8, visibleWidth: 1280, visibleHeight: 720 });
+  assert.deepEqual(fittedViewport(session, { width: 1280, height: 1024 }), { width: 1600, height: 900, scale: 1024 / 900, visibleWidth: 1820, visibleHeight: 1024 });
   session.settings = { width: 390, height: 844 };
   const mobile = fittedViewport(session, { width: 1920, height: 1080 });
   assert.equal(mobile.visibleHeight, 1080);
@@ -13,19 +13,19 @@ test("fixed desktop and mobile dimensions preserve aspect ratio at any screen si
   assert.equal(mobile.width, 390);
   assert.equal(mobile.height, 844);
 });
-test("automatic desktop height tracks fullscreen space and ignores its own emulated dimensions", async () => {
+test("desktop keeps its saved layout and scales to the full height when fullscreen space changes", async () => {
   const h = mockChrome();
   const session = h.activate();
   h.window.width = 1600; h.window.height = 1000;
   await refreshViewport(session);
-  assert.deepEqual(session.view, { width: 1280, height: 1000, scale: 1, visibleWidth: 1280, visibleHeight: 1000 });
+  assert.deepEqual(session.view, { width: 1920, height: 1080, scale: 1000 / 1080, visibleWidth: 1778, visibleHeight: 1000 });
   const count = h.calls.length;
   await refreshViewport(session);
   assert.equal(h.calls.length, count);
 });
 test("toggle-off exits fullscreen even if the window was already fullscreen at activation", async () => {
   const h = mockChrome(); h.window.state = "fullscreen"; h.window.width = 1920; h.window.height = 1080;
-  const session = await startViewport(page, { width: 1300, height: 0 }, "desktop");
+  const session = await startViewport(page, { width: 1300, height: 731 }, "desktop");
   assert.equal(session.restoreState, "normal");
   await closeViewport(session);
   assert.equal(h.window.state, "normal");
@@ -36,7 +36,7 @@ test("failed session persistence still releases debugger ownership", async () =>
   const h = mockChrome();
   const set = chrome.storage.session.set;
   chrome.storage.session.set = async values => { if (values.viewportSession) throw new Error("Storage unavailable"); return set(values); };
-  await assert.rejects(startViewport(page, { width: 1300, height: 0 }, "desktop"), /Storage unavailable/);
+  await assert.rejects(startViewport(page, { width: 1300, height: 731 }, "desktop"), /Storage unavailable/);
   assert.equal(h.attached, false);
   assert.equal(h.window.state, "normal");
 });
@@ -80,7 +80,7 @@ test("a delayed fullscreen window state is awaited instead of rejecting stable o
     if (transitioning && ++reads < 18) bounds.state = "normal";
     return bounds;
   };
-  const session = await startViewport(page, { width: 1300, height: 0 }, "desktop");
+  const session = await startViewport(page, { width: 1300, height: 731 }, "desktop");
   assert.ok(reads >= 18);
   assert.equal(session.fullscreenMethod, "window");
   assert.equal(h.calls.some(call => call.type === "DOCUMENT_FULLSCREEN_ENTER"), false);
@@ -121,9 +121,9 @@ test("a rejected native request can still use page fullscreen for desktop dimens
     if (changes.state === "fullscreen") throw new Error("Window fullscreen unsupported");
     return update(id, changes);
   };
-  const session = await startViewport(page, { width: 1280, height: 0 }, "desktop");
+  const session = await startViewport(page, { width: 1280, height: 720 }, "desktop");
   assert.equal(session.fullscreenMethod, "document");
-  assert.deepEqual(session.view, { width: 1280, height: 1080, scale: 1, visibleWidth: 1280, visibleHeight: 1080 });
+  assert.deepEqual(session.view, { width: 1280, height: 720, scale: 1.5, visibleWidth: 1920, visibleHeight: 1080 });
 });
 test("when both fullscreen methods fail, no viewport is applied and debugger ownership is released", async () => {
   const h = mockChrome();
@@ -133,9 +133,26 @@ test("when both fullscreen methods fail, no viewport is applied and debugger own
     return update(id, changes);
   };
   h.document.documentElement.requestFullscreen = async () => { throw new Error("Fullscreen denied"); };
-  await assert.rejects(startViewport(page, { width: 1300, height: 0 }, "desktop"), /Fullscreen denied/);
+  await assert.rejects(startViewport(page, { width: 1300, height: 731 }, "desktop"), /Fullscreen denied/);
   assert.equal(h.attached, false);
   assert.equal(h.sessionStorage.viewportSession, undefined);
   assert.equal(h.document.fullscreenElement, null);
   assert.equal(h.calls.some(call => call.method === "Emulation.setDeviceMetricsOverride"), false);
+});
+
+test("a wide desktop paints only visible pixels while keeping full-height scaling and its CSS aspect ratio", async () => {
+  const h = mockChrome();
+  const session = h.activate({ settings: { width: 1600, height: 900 } });
+  h.window.width = 1280; h.window.height = 1024;
+  await refreshViewport(session);
+  assert.equal(session.view.scale, 1024 / 900);
+  assert.equal(session.view.visibleHeight, 1024);
+  assert.equal(session.view.visibleWidth, 1820);
+  const metrics = h.calls.find(call => call.method === "Emulation.setDeviceMetricsOverride");
+  assert.equal(metrics.params.width, 1600); assert.equal(metrics.params.height, 900);
+  assert.deepEqual(h.calls.filter(call => call.method === "Emulation.setVisibleSize").at(-1).params, { width: 1280, height: 1024 });
+  h.window.width = 1400;
+  await refreshViewport(session);
+  assert.deepEqual(h.calls.filter(call => call.method === "Emulation.setVisibleSize").at(-1).params, { width: 1400, height: 1024 });
+  assert.equal(session.view.scale, 1024 / 900);
 });

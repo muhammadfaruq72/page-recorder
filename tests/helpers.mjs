@@ -61,9 +61,9 @@ export function mockChrome(preferences = {}) {
   function activate(overrides = {}) {
     window.state = "fullscreen"; window.width = 1920; window.height = 1080;
     return sessionStorage.viewportSession = {
-      ...page, tabId: page.id, origin: "https://example.com", sessionId: "one", phase: "active", mode: "desktop", settings: { width: 1280, height: 0 },
+      ...page, tabId: page.id, origin: "https://example.com", sessionId: "one", phase: "active", mode: "desktop", settings: { width: 1920, height: 1080 },
       restoreState: "normal", originalInsets: { width: 20, height: 100 }, fullscreenInsets: { width: 0, height: 0 },
-      view: { width: 1280, height: 1080, scale: 1, visibleWidth: 1280, visibleHeight: 1080 }, ...overrides,
+      view: { width: 1920, height: 1080, scale: 1, visibleWidth: 1920, visibleHeight: 1080 }, ...overrides,
     };
   }
   const message = (message, sender = { id: "test-extension", url: "chrome-extension://test-extension/options.html" }) => new Promise((resolve, reject) => {

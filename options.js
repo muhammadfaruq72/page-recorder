@@ -1,4 +1,4 @@
-import { loadDesktopSettings, saveDesktopSettings, loadScrollSettings, saveScrollSettings, loadMobileSettings, saveMobileSettings, COLLECT_POINTS_KEY, SCROLL_POINTS_KEY } from "./settings.js";
+import { DEFAULT_DESKTOP_SETTINGS, loadDesktopSettings, saveDesktopSettings, loadScrollSettings, saveScrollSettings, loadMobileSettings, saveMobileSettings, COLLECT_POINTS_KEY, SCROLL_POINTS_KEY } from "./settings.js";
 
 function statusMessage(element, text, error = false) {
   element.textContent = text;
@@ -16,7 +16,7 @@ const mobileWidth = document.querySelector("#mobile-width");
 const mobileHeight = document.querySelector("#mobile-height");
 const mobileStatus = document.querySelector("#mobile-status");
 function desktopSummary(settings) {
-  return `${settings.width} px wide × ${settings.height ? `${settings.height} px high` : "automatic fullscreen height"}. Applies the next time you turn on the viewport.`;
+  return `${settings.width} × ${settings.height} CSS px. Scales to the full available height with this aspect ratio. Applies on the next activation or switch to desktop.`;
 }
 async function initializeDimensions() {
   try {
@@ -40,6 +40,16 @@ desktopForm.addEventListener("submit", async event => {
   try {
     const saved = await saveDesktopSettings({ width: desktopWidth.valueAsNumber, height: desktopHeight.valueAsNumber });
     statusMessage(desktopStatus, `Saved. ${desktopSummary(saved)}`);
+  } catch (error) { statusMessage(desktopStatus, error.message, true); }
+  finally { desktopFields.disabled = false; }
+});
+document.querySelector("#desktop-default").addEventListener("click", async () => {
+  desktopFields.disabled = true;
+  try {
+    const saved = await saveDesktopSettings(DEFAULT_DESKTOP_SETTINGS);
+    desktopWidth.value = saved.width;
+    desktopHeight.value = saved.height;
+    statusMessage(desktopStatus, `Default restored. ${desktopSummary(saved)}`);
   } catch (error) { statusMessage(desktopStatus, error.message, true); }
   finally { desktopFields.disabled = false; }
 });
@@ -211,6 +221,10 @@ clearPoints.addEventListener("click", async () => {
   } catch (error) { pointStatus(error.message, true); clearPoints.disabled = false; }
 });
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.mobileViewportSettings?.newValue) {
+    mobileEnabled.checked = changes.mobileViewportSettings.newValue.enabled;
+    mobileFields.disabled = !mobileEnabled.checked;
+  }
   if (area === "local" && (changes[COLLECT_POINTS_KEY] || changes[SCROLL_POINTS_KEY])) {
     void renderPoints().catch(error => pointStatus(error.message, true));
   }

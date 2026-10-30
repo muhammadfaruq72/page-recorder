@@ -31,23 +31,30 @@ async function nativeSize(session) {
   return size;
 }
 
-export function fittedViewport(session, bounds) {
+export function availableViewportSize(session, bounds) {
   // A browser using page fullscreen may keep reporting its old normal window
   // bounds, or update them later. Use the native page measurement captured
   // before emulation rather than letting those reports distort the preview.
-  const available = session.fullscreenMethod === "document" && session.fullscreenSize || {
+  return session.fullscreenMethod === "document" && session.fullscreenSize || {
     width: Math.max(1, bounds.width - session.fullscreenInsets.width),
     height: Math.max(1, bounds.height - session.fullscreenInsets.height),
   };
+}
+export function fittedViewport(session, bounds) {
+  const available = availableViewportSize(session, bounds);
   const width = session.settings.width;
-  const height = session.settings.height || available.height;
-  const scale = Math.min(available.width / width, available.height / height);
-  return { width, height, scale, visibleWidth: Math.max(1, Math.round(width * scale)), visibleHeight: Math.max(1, Math.round(height * scale)) };
+  const height = session.settings.height;
+  const scale = available.height / height;
+  // Height is the anchor in both modes. Width follows the exact saved ratio;
+  // a wide aspect may extend past the browser's right edge rather than shrink.
+  return { width, height, scale, visibleWidth: Math.max(1, Math.round(width * scale)), visibleHeight: available.height };
 }
 export async function refreshViewport(session) {
   const bounds = await chrome.windows.get(session.windowId);
   const view = fittedViewport(session, bounds);
-  if (JSON.stringify(session.view) === JSON.stringify(view)) return session;
+  const available = availableViewportSize(session, bounds);
+  const surfaceWidth = Math.min(view.visibleWidth, available.width);
+  if (JSON.stringify(session.view) === JSON.stringify(view) && session.surfaceWidth === surfaceWidth) return session;
   await send(session, "Emulation.setDeviceMetricsOverride", {
     width: view.width, height: view.height, deviceScaleFactor: 0,
     mobile: session.mode === "mobile", screenWidth: view.width, screenHeight: view.height,
@@ -55,8 +62,11 @@ export async function refreshViewport(session) {
   });
   // The native page surface is anchored at the upper-left of the tab. Only
   // this surface changes size; the browser remains fullscreen.
-  await send(session, "Emulation.setVisibleSize", { width: view.visibleWidth, height: view.visibleHeight });
+  // Clip only the painted surface at the browser edge. The CSS layout and its
+  // uniform height-based scale stay intact, without rendering hidden pixels.
+  await send(session, "Emulation.setVisibleSize", { width: surfaceWidth, height: view.visibleHeight });
   session.view = view;
+  session.surfaceWidth = surfaceWidth;
   await chrome.storage.session.set({ [VIEWPORT_SESSION_KEY]: session });
   return session;
 }

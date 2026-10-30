@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Page Viewport",
-  "version": "2.0.3",
+  "version": "2.2.0",
   "description": "Toggle left-aligned desktop or mobile viewports in fullscreen. Collect scroll points and move smoothly with keyboard shortcuts.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -42,13 +42,14 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Page Viewport \u2014 click for fullscreen viewport and scrolling",
+    "default_title": "Page Viewport \u2014 open controls",
     "default_icon": {
       "16": "icons/record-16.png",
       "32": "icons/record-32.png",
       "48": "icons/record-48.png",
       "128": "icons/record-128.png"
-    }
+    },
+    "default_popup": "popup.html"
   },
   "icons": {
     "16": "icons/record-16.png",

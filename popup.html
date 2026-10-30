@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Page Viewport</title>
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.js"></script>
+</head>
+<body>
+  <header><img src="icons/record-32.png" alt="" width="28" height="28"><h1>Page Viewport</h1></header>
+  <fieldset id="controls" disabled>
+    <legend class="sr-only">Viewport controls</legend>
+    <label class="row" for="fullscreen"><span>Fullscreen view<small id="viewport-size">Use saved dimensions</small></span><input id="fullscreen" type="checkbox" role="switch"></label>
+    <label class="row" for="mobile"><span>Mobile mode<small>Off = desktop · changes active view immediately</small></span><input id="mobile" type="checkbox" role="switch"></label>
+    <label class="row" for="collection"><span>Collect scroll points<small>Show Save, Clear and mode buttons on the page</small></span><input id="collection" type="checkbox" role="switch"></label>
+    <div class="clear-row"><span id="point-count">0 saved points</span><button id="clear-points" type="button">Clear points</button></div>
+  </fieldset>
+  <p id="page-url"></p>
+  <p id="status" role="status" aria-live="polite">Loading…</p>
+  <button id="settings" class="link" type="button">Settings and shortcuts</button>
+</body>
+</html>

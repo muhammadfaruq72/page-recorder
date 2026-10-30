@@ -1,20 +1,14 @@
-import { COLLECT_POINTS_KEY, SCROLL_POINTS_KEY, SCROLL_SETTINGS_KEY, loadScrollSettings, loadMobileSettings, loadDesktopSettings, scrollPointsPageKey } from "./settings.js";
+import { COLLECT_POINTS_KEY, SCROLL_POINTS_KEY, SCROLL_SETTINGS_KEY, loadScrollSettings, loadMobileSettings, saveMobileSettings, loadDesktopSettings, scrollPointsPageKey } from "./settings.js";
 import { scrollPage } from "./smooth-scroll.js";
 import { scrollShortcuts } from "./scroll-shortcuts.js";
-import { startViewport, refreshViewport, closeViewport, viewportSession, restorePendingViewport, VIEWPORT_SESSION_KEY } from "./viewport.js";
+import { startViewport, refreshViewport, closeViewport, viewportSession, restorePendingViewport, availableViewportSize, VIEWPORT_SESSION_KEY } from "./viewport.js";
 import { isViewportFullscreen } from "./fullscreen.js";
 
 let updates = Promise.resolve();
-let pointWrites = Promise.resolve();
 const recentScrollKeys = [];
 function queue(operation) {
   const next = updates.catch(() => {}).then(operation);
   updates = next;
-  return next;
-}
-function changePoints(operation) {
-  const next = pointWrites.catch(() => {}).then(operation);
-  pointWrites = next;
   return next;
 }
 async function report(error) {
@@ -23,13 +17,14 @@ async function report(error) {
 }
 export async function updateAction(session = {}) {
   const active = session.phase === "active";
-  const busy = ["starting", "stopping"].includes(session.phase);
+  const busy = ["starting", "switching", "stopping"].includes(session.phase);
   const titles = {
-    active: `Page Viewport — ${session.mode} ${session.view?.width} × ${session.view?.height}; click to turn off`,
+    active: `Page Viewport — ${session.mode} ${session.view?.width} × ${session.view?.height}; open controls`,
     starting: "Page Viewport — entering fullscreen…",
+    switching: "Page Viewport — changing viewport…",
     stopping: "Page Viewport — restoring page…",
     error: `Page Viewport — ${session.error}. Click to try again.`,
-    idle: "Page Viewport — click for fullscreen viewport and scrolling",
+    idle: "Page Viewport — open controls",
   };
   const icon = active || busy ? "stop" : "record";
   await Promise.all([
@@ -76,18 +71,10 @@ export async function toggleViewport(tab) {
   if (!Number.isInteger(tab?.id) || !/^(https?:|file:)/i.test(tab.url || "")) throw new Error("Open a regular webpage to use the viewport toggle");
   await updateAction({ phase: "starting" });
   try {
-    // Remove an existing collector before fullscreen or viewport work begins.
-    // Its cleanup also invalidates pending refreshes that could recreate it.
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id }, injectImmediately: true,
-      func: () => { globalThis.__pageRecorderPointCollector?.remove(); },
-    });
     await restorePendingViewport();
     const mobile = await loadMobileSettings();
     const settings = mobile.enabled ? { width: mobile.width, height: mobile.height } : await loadDesktopSettings();
     const active = await startViewport(tab, settings, mobile.enabled ? "mobile" : "desktop");
-    // Replacing the collector removes its button immediately; the new instance
-    // reads this tab's active session and keeps it hidden until toggle-off.
     await syncPointCollectors(active.tabId);
     await chrome.storage.session.remove("scrollPointSequence");
     await syncShortcuts(active);
@@ -99,7 +86,101 @@ export async function toggleViewport(tab) {
     throw error;
   }
 }
-chrome.action.onClicked.addListener(tab => queue(() => toggleViewport(tab)).catch(report));
+
+export async function setViewportMode(enabled) {
+  if (typeof enabled !== "boolean") throw new Error("Choose desktop or mobile mode.");
+  const mobile = await loadMobileSettings();
+  const mode = enabled ? "mobile" : "desktop";
+  const session = await viewportSession();
+  if (!session) { await saveMobileSettings({ ...mobile, enabled }); return; }
+  if (session.phase !== "active") throw new Error("Wait for the viewport to finish changing.");
+  if (session.mode === mode) { await saveMobileSettings({ ...mobile, enabled }); return; }
+  const previous = structuredClone(session);
+  const settings = enabled ? { width: mobile.width, height: mobile.height } : await loadDesktopSettings();
+  await cancelScroll(session);
+  try {
+    session.phase = "switching";
+    await chrome.storage.session.set({ [VIEWPORT_SESSION_KEY]: session });
+    await updateAction(session);
+    session.mode = mode;
+    session.settings = settings;
+    delete session.view; // Apply the mode even if both saved dimensions match.
+    await chrome.debugger.sendCommand({ tabId: session.tabId }, "Emulation.setTouchEmulationEnabled", { enabled, maxTouchPoints: 1 });
+    await refreshViewport(session);
+    await saveMobileSettings({ ...mobile, enabled });
+    await chrome.storage.session.remove("scrollPointSequence");
+    recentScrollKeys.length = 0;
+    session.phase = "active";
+    await chrome.storage.session.set({ [VIEWPORT_SESSION_KEY]: session });
+    await syncShortcuts(session);
+    await syncPointCollectors(session.tabId);
+    await updateAction(session);
+  } catch (error) {
+    try {
+      delete previous.view;
+      await chrome.debugger.sendCommand({ tabId: previous.tabId }, "Emulation.setTouchEmulationEnabled", { enabled: previous.mode === "mobile", maxTouchPoints: 1 });
+      await refreshViewport(previous);
+      await saveMobileSettings(mobile);
+      await syncPointCollectors(previous.tabId);
+      await updateAction(previous);
+    } catch { await stopSession(previous).catch(() => {}); }
+    throw error;
+  }
+}
+async function savePoint(url, top) {
+  const saved = await chrome.storage.local.get([COLLECT_POINTS_KEY, SCROLL_POINTS_KEY]);
+  if (!saved[COLLECT_POINTS_KEY]) throw new Error("Turn on Collect scroll points first.");
+  if (!Number.isSafeInteger(top) || top < 0) throw new Error("Invalid scroll position.");
+  const key = scrollPointsPageKey(url), pages = saved[SCROLL_POINTS_KEY] || {};
+  const points = pages[key] || [];
+  if (points.at(-1) !== top) points.push(top);
+  pages[key] = points;
+  await chrome.storage.local.set({ [SCROLL_POINTS_KEY]: pages });
+  // Points added during fullscreen remain available after playback has begun.
+  const { scrollPointSequence: sequence } = await chrome.storage.session.get("scrollPointSequence");
+  if (sequence?.url === key) await chrome.storage.session.set({ scrollPointSequence: { ...sequence, points } });
+  return { count: points.length, top };
+}
+async function clearPagePoints(url) {
+  const key = scrollPointsPageKey(url);
+  const saved = await chrome.storage.local.get(SCROLL_POINTS_KEY);
+  const pages = saved[SCROLL_POINTS_KEY] || {};
+  delete pages[key];
+  const session = await viewportSession();
+  const activeTab = session ? await chrome.tabs.get(session.tabId).catch(() => undefined) : undefined;
+  if (activeTab?.url && scrollPointsPageKey(activeTab.url) === key) {
+    await cancelScroll(session);
+    await chrome.storage.session.remove("scrollPointSequence");
+  }
+  await chrome.storage.local.set({ [SCROLL_POINTS_KEY]: pages });
+  return { count: 0 };
+}
+async function controlState(tabId, { preferSession = false, url } = {}) {
+  const session = await viewportSession();
+  const mobile = await loadMobileSettings();
+  const saved = await chrome.storage.local.get([COLLECT_POINTS_KEY, SCROLL_POINTS_KEY]);
+  if (preferSession && session) tabId = session.tabId;
+  let tab;
+  if (Number.isInteger(tabId)) { try { tab = await chrome.tabs.get(tabId); } catch { /* Closed tab. */ } }
+  const pageUrl = url || tab?.url;
+  const supported = /^(https?:|file:)/i.test(pageUrl || "");
+  const key = supported ? scrollPointsPageKey(pageUrl) : undefined;
+  const ownsSession = !!session && session.tabId === tabId;
+  let controlsRightInset = 0;
+  if (ownsSession && session.view?.scale > 0) {
+    const available = availableViewportSize(session, await chrome.windows.get(session.windowId));
+    controlsRightInset = Math.max(0, session.view.width - available.width / session.view.scale);
+  }
+  return {
+    tabId, url: key, supported, fullscreen: !!session && (preferSession || ownsSession),
+    active: ownsSession && session?.phase === "active", busy: !!session && session.phase !== "active",
+    otherActive: !!session && !ownsSession, sessionId: ownsSession ? session?.sessionId : undefined,
+    mobile: ownsSession ? session.mode === "mobile" : mobile.enabled,
+    width: ownsSession ? session.view?.width : undefined, height: ownsSession ? session.view?.height : undefined,
+    controlsRightInset,
+    collectionEnabled: !!saved[COLLECT_POINTS_KEY], count: key ? saved[SCROLL_POINTS_KEY]?.[key]?.length || 0 : 0,
+  };
+}
 
 async function scrollNextPoint(session, settings) {
   const tab = await chrome.tabs.get(session.tabId);
@@ -197,37 +278,63 @@ chrome.windows.onBoundsChanged.addListener(bounds => queue(async () => {
   // Escape/manual fullscreen exit turns the mode off instead of forcing it back.
   if (!await isViewportFullscreen(session)) return stopSession(session);
   await refreshViewport(session);
+  if ((await chrome.storage.local.get(COLLECT_POINTS_KEY))[COLLECT_POINTS_KEY]) {
+    await chrome.scripting.executeScript({ target: { tabId: session.tabId }, func: () => { void globalThis.__pageRecorderPointCollector?.refresh?.(); } });
+  }
   await updateAction(session);
 }).catch(report));
 
-function optionsSender(sender) {
-  try { const url = new URL(sender.url); url.search = ""; url.hash = ""; return url.href === chrome.runtime.getURL("options.html"); }
+function extensionPage(sender, path) {
+  try { const url = new URL(sender.url); url.search = ""; url.hash = ""; return url.href === chrome.runtime.getURL(path); }
   catch { return false; }
+}
+function pageSender(sender) {
+  return Number.isInteger(sender.tab?.id) && sender.frameId === 0 && /^https?:/.test(sender.url || "");
 }
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || message?.target !== "background") return;
   let operation;
-  if (message.type === "POINT_COLLECTION_STATE") {
-    if (!Number.isInteger(sender.tab?.id) || sender.frameId !== 0) return;
-    operation = viewportSession().then(session => ({ suspended: session?.tabId === sender.tab.id }));
-  } else if (message.type === "COLLECT_POINT") {
-    if (!Number.isInteger(sender.tab?.id) || sender.frameId !== 0 || !/^https?:/.test(sender.url || "")) return;
-    operation = changePoints(async () => {
-      const saved = await chrome.storage.local.get([COLLECT_POINTS_KEY, SCROLL_POINTS_KEY]);
-      if (!saved[COLLECT_POINTS_KEY]) throw new Error("Turn on Collect scroll points in settings first.");
-      if (!Number.isSafeInteger(message.top) || message.top < 0) throw new Error("Invalid scroll position.");
-      const url = scrollPointsPageKey(sender.url), pages = saved[SCROLL_POINTS_KEY] || {};
-      const points = pages[url] || [];
-      if (points.at(-1) !== message.top) points.push(message.top);
-      pages[url] = points;
-      await chrome.storage.local.set({ [SCROLL_POINTS_KEY]: pages });
-      return { count: points.length };
+  if (message.type === "POPUP_STATE" && extensionPage(sender, "popup.html")) {
+    operation = controlState(message.tabId, { preferSession: true }).then(state => ({ state }));
+  } else if (["SET_FULLSCREEN", "SET_MODE", "SET_COLLECTION", "CLEAR_PAGE_POINTS"].includes(message.type) && extensionPage(sender, "popup.html")) {
+    operation = queue(async () => {
+      if (message.type !== "CLEAR_PAGE_POINTS" && typeof message.enabled !== "boolean") throw new Error("Choose on or off.");
+      const session = await viewportSession();
+      const tabId = session?.tabId ?? message.tabId;
+      if (message.type === "SET_FULLSCREEN") {
+        if (message.enabled && !session) await toggleViewport(await chrome.tabs.get(tabId));
+        else if (!message.enabled && session) await stopSession(session);
+      } else if (message.type === "SET_MODE") await setViewportMode(message.enabled);
+      else if (message.type === "SET_COLLECTION") {
+        if (message.enabled && !await chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] })) throw new Error("Allow website access to show the page buttons.");
+        await chrome.storage.local.set({ [COLLECT_POINTS_KEY]: message.enabled });
+        // Target this tab synchronously. Other loading tabs must not block UI.
+        if (Number.isInteger(tabId)) await syncPointCollectors(tabId);
+      } else await clearPagePoints((await chrome.tabs.get(tabId)).url);
+      return { state: await controlState(message.tabId, { preferSession: true }) };
+    }).catch(async error => {
+      if (message.type === "SET_FULLSCREEN") await updateAction({ phase: "error", error: error.message });
+      throw error;
     });
-  } else if (message.type === "CLEAR_SCROLL_POINTS" && optionsSender(sender)) {
-    operation = changePoints(() => queue(async () => {
+  } else if (message.type === "PAGE_CONTROL_STATE" && pageSender(sender)) {
+    operation = controlState(sender.tab.id, { url: sender.url }).then(state => ({ state }));
+  } else if (["COLLECT_POINT", "PAGE_CLEAR_POINTS", "PAGE_SET_MODE"].includes(message.type) && pageSender(sender)) {
+    operation = queue(async () => {
+      if (!(await chrome.storage.local.get(COLLECT_POINTS_KEY))[COLLECT_POINTS_KEY]) throw new Error("Turn on Collect scroll points first.");
+      if (message.type === "COLLECT_POINT") return savePoint(sender.url, message.top);
+      if (message.type === "PAGE_CLEAR_POINTS") return clearPagePoints(sender.url);
+      const session = await viewportSession();
+      if (session && session.tabId !== sender.tab.id) throw new Error("Switch modes in the active viewport tab.");
+      await setViewportMode(message.enabled);
+      return { state: await controlState(sender.tab.id, { url: sender.url }) };
+    });
+  } else if (message.type === "CLEAR_SCROLL_POINTS" && extensionPage(sender, "options.html")) {
+    operation = queue(async () => {
+      const session = await viewportSession();
+      if (session) await cancelScroll(session);
       await chrome.storage.local.set({ [SCROLL_POINTS_KEY]: {} });
       await chrome.storage.session.remove("scrollPointSequence");
-    }));
+    });
   } else if (message.type === "SCROLL_KEY") {
     if (!Number.isInteger(sender.tab?.id) || sender.frameId !== 0) return;
     operation = handleScrollCommand(message.command, { source: "page", tabId: sender.tab.id, sessionId: message.sessionId });
@@ -236,7 +343,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     operation = queue(async () => {
       const session = await viewportSession();
       if (session?.phase !== "active" || session.fullscreenMethod !== "document" || session.tabId !== sender.tab.id || session.sessionId !== message.sessionId) return;
-      // Recheck the browser state; page code cannot end a different session.
       if (!await isViewportFullscreen(session)) await stopSession(session);
     });
   } else return;

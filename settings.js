@@ -3,26 +3,31 @@ export const MOBILE_SETTINGS_KEY = "mobileViewportSettings";
 export const SCROLL_SETTINGS_KEY = "smoothScrollSettings";
 export const COLLECT_POINTS_KEY = "collectScrollPoints";
 export const SCROLL_POINTS_KEY = "scrollPoints";
-export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({ width: 1280, height: 0 });
+export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({ width: 1920, height: 1080 });
 export const DEFAULT_MOBILE_SETTINGS = Object.freeze({ enabled: false, width: 390, height: 844 });
 export const DEFAULT_SCROLL_SETTINGS = Object.freeze({ enabled: false, easing: "smootherstep", durationMs: 1500, stepPercent: 30 });
 export const SCROLL_EASINGS = ["smootherstep", "ease-in-out-sine", "ease-out-cubic", "linear"];
 
-function dimension(value, name, max, automatic = false) {
-  if (automatic && value === 0) return value;
+function dimension(value, name, max) {
   if (!Number.isInteger(value) || value < 100 || value > max) {
-    throw new Error(`${name} must be a whole number between 100 and ${max.toLocaleString("en-US")} pixels.${automatic ? " Use 0 for automatic height." : ""}`);
+    throw new Error(`${name} must be a whole number between 100 and ${max.toLocaleString("en-US")} pixels.`);
   }
   return value;
 }
 export function validateDesktopSettings(settings) {
-  return { width: dimension(settings?.width, "Desktop width", 16384), height: dimension(settings?.height, "Desktop height", 16384, true) };
+  return { width: dimension(settings?.width, "Desktop width", 16384), height: dimension(settings?.height, "Desktop height", 16384) };
 }
 export async function loadDesktopSettings() {
   const saved = await chrome.storage.local.get([DESKTOP_SETTINGS_KEY, "recordingWindowWidth", "recordingWindowSize"]);
-  if (saved[DESKTOP_SETTINGS_KEY]) return validateDesktopSettings({ ...DEFAULT_DESKTOP_SETTINGS, ...saved[DESKTOP_SETTINGS_KEY] });
-  const oldWidth = saved.recordingWindowWidth ?? saved.recordingWindowSize?.width;
-  if (oldWidth != null) return saveDesktopSettings({ width: oldWidth, height: 0 });
+  const current = saved[DESKTOP_SETTINGS_KEY];
+  if (current?.height > 0) return validateDesktopSettings(current);
+  // Older versions stored a width and automatic height (0). Keep that width
+  // and supply a reference height derived from the new desktop aspect ratio.
+  const widthOnly = current?.width ?? saved.recordingWindowWidth ?? saved.recordingWindowSize?.width;
+  if (widthOnly != null) return saveDesktopSettings({
+    width: widthOnly,
+    height: Math.max(100, Math.round(widthOnly * DEFAULT_DESKTOP_SETTINGS.height / DEFAULT_DESKTOP_SETTINGS.width)),
+  });
   return { ...DEFAULT_DESKTOP_SETTINGS };
 }
 export async function saveDesktopSettings(settings) {

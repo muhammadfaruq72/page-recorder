@@ -14,16 +14,17 @@
       <section class="card" aria-labelledby="desktop-heading">
         <span class="eyebrow">FULLSCREEN · ALIGNED LEFT</span>
         <h1 id="desktop-heading">Desktop viewport</h1>
-        <p class="intro">Click the toolbar button to enter fullscreen with a fixed webpage viewport aligned to the left. Click again to restore the page and exit fullscreen. Both modes change the page surface inside the browser.</p>
+        <p class="intro">Click the toolbar icon to open the controls, then turn on Fullscreen view. The webpage stays aligned left at your saved dimensions. Turn the switch off to restore the page and exit fullscreen.</p>
         <form id="desktop-form">
           <fieldset id="desktop-fields" disabled>
             <legend class="sr-only">Desktop dimensions</legend>
             <div class="scroll-dimensions">
               <label for="desktop-width">Width<span class="input-wrap"><input id="desktop-width" type="number" min="100" max="16384" step="1" required><span>px</span></span></label>
-              <label for="desktop-height">Height<span class="input-wrap"><input id="desktop-height" type="number" min="0" max="16384" step="1" required aria-describedby="desktop-help"><span>px</span></span></label>
+              <label for="desktop-height">Height<span class="input-wrap"><input id="desktop-height" type="number" min="100" max="16384" step="1" required aria-describedby="desktop-help"><span>px</span></span></label>
             </div>
-            <p class="help" id="desktop-help">Height 0 uses the available fullscreen height. Dimensions are CSS pixels. The whole viewport fits on screen with its aspect ratio preserved, aligned at the upper-left. Window width and height are never set by the extension.</p>
+            <p class="help" id="desktop-help">Default: 1920 × 1080 (16:9). The preview always fills the available fullscreen height, with width scaled by the same factor and aligned left. A wider aspect can extend beyond the screen’s right edge. Dimensions are CSS pixels; browser window dimensions are never set.</p>
             <button type="submit">Save desktop dimensions</button>
+            <button id="desktop-default" class="secondary" type="button">Use default · 1920 × 1080</button>
           </fieldset>
           <p id="desktop-status" class="status" role="status" aria-live="polite">Loading desktop settings…</p>
         </form>
@@ -54,10 +55,10 @@
         <span class="eyebrow">SAVE YOUR POSITIONS</span>
         <h2 id="points-heading">Scroll points</h2>
         <div class="switch-row">
-          <label for="points-collect">Collect scroll points<span class="switch-hint">Shows a Save scroll point button on websites. Hidden while viewport mode is active.</span></label>
+          <label for="points-collect">Collect scroll points<span class="switch-hint">Shows Save scroll point, Clear points and a desktop/mobile button on websites, including fullscreen.</span></label>
           <input id="points-collect" class="mode-switch" type="checkbox" role="switch" disabled>
         </div>
-        <p class="help">Turn on collection, open your webpage, scroll to a position, and click Save scroll point before activating viewport mode. Positions are saved per page URL in collection order. The button returns after viewport mode turns off if collection is still enabled.</p>
+        <p class="help">Turn on collection, open your webpage, scroll to a position, and click Save scroll point. The page buttons stay visible in fullscreen. Clear points removes only that page’s positions; the button below clears every page. Positions are saved per page URL in collection order.</p>
         <div id="points-list" class="points-list" aria-label="Saved scroll points"></div>
         <button id="points-clear" class="secondary" type="button" disabled>Clear all points</button>
         <p class="help">Turn collection off when finished. While viewport mode is on, press the next-point shortcut to move smoothly to each position. A new activation starts at the first point. After the last point, additional presses do nothing. Points use the document’s vertical scroll offset; collection supports HTTP and HTTPS websites.</p>
@@ -99,7 +100,7 @@
           <p class="help">Shortcuts control the viewport tab while your browser is in front. In Arc, use In Arc scope and keep the webpage focused. Your existing assignments are preserved.</p>
         </div>
       </section>
-      <p class="footer">The toolbar button toggles fullscreen viewport mode. This extension does not record video.</p>
+      <p class="footer">The toolbar icon opens fullscreen, mode and collection switches plus Clear points. Website buttons appear while collection is on. This extension does not record video.</p>
     </main>
   </body>
 </html>
