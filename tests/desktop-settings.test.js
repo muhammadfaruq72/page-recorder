@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { mockChrome } from "./helpers.mjs";
 import { loadDesktopSettings, saveDesktopSettings, loadScrollSettings, DEFAULT_SCROLL_SETTINGS } from "../settings.js";
 
-test("desktop defaults to a 1920 by 1080 reference resolution", async () => {
-  mockChrome(); assert.deepEqual(await loadDesktopSettings(), { width: 1920, height: 1080 });
+test("desktop defaults to a 1080 by 1215 reference resolution", async () => {
+  mockChrome(); assert.deepEqual(await loadDesktopSettings(), { width: 1080, height: 1215 });
 });
 test("existing saved window width migrates to viewport width while obsolete window height is discarded", async () => {
-  for (const preferences of [{ recordingWindowWidth: 1300 }, { recordingWindowSize: { width: 1100, height: 700 } }, { desktopViewportSettings: { width: 1280, height: 0 } }]) {
+  for (const preferences of [{ recordingWindowWidth: 1300 }, { recordingWindowSize: { width: 1100, height: 700 } }, { desktopViewportSettings: { width: 1280, height: 0 } }, { recordingWindowWidth: 16384 }]) {
     const h = mockChrome(preferences);
     const expected = preferences.recordingWindowWidth || preferences.recordingWindowSize?.width || preferences.desktopViewportSettings.width;
-    const height = Math.round(expected * 9 / 16);
+    const height = Math.min(16384, Math.round(expected * 9 / 8));
     assert.deepEqual(await loadDesktopSettings(), { width: expected, height });
     assert.deepEqual(h.preferences, { desktopViewportSettings: { width: expected, height } });
   }

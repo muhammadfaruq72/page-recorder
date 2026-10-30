@@ -3,7 +3,7 @@ export const MOBILE_SETTINGS_KEY = "mobileViewportSettings";
 export const SCROLL_SETTINGS_KEY = "smoothScrollSettings";
 export const COLLECT_POINTS_KEY = "collectScrollPoints";
 export const SCROLL_POINTS_KEY = "scrollPoints";
-export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({ width: 1920, height: 1080 });
+export const DEFAULT_DESKTOP_SETTINGS = Object.freeze({ width: 1080, height: 1215 });
 export const DEFAULT_MOBILE_SETTINGS = Object.freeze({ enabled: false, width: 390, height: 844 });
 export const DEFAULT_SCROLL_SETTINGS = Object.freeze({ enabled: false, easing: "smootherstep", durationMs: 1500, stepPercent: 30 });
 export const SCROLL_EASINGS = ["smootherstep", "ease-in-out-sine", "ease-out-cubic", "linear"];
@@ -26,7 +26,7 @@ export async function loadDesktopSettings() {
   const widthOnly = current?.width ?? saved.recordingWindowWidth ?? saved.recordingWindowSize?.width;
   if (widthOnly != null) return saveDesktopSettings({
     width: widthOnly,
-    height: Math.max(100, Math.round(widthOnly * DEFAULT_DESKTOP_SETTINGS.height / DEFAULT_DESKTOP_SETTINGS.width)),
+    height: Math.min(16384, Math.max(100, Math.round(widthOnly * DEFAULT_DESKTOP_SETTINGS.height / DEFAULT_DESKTOP_SETTINGS.width))),
   });
   return { ...DEFAULT_DESKTOP_SETTINGS };
 }

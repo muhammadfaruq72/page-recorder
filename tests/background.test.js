@@ -11,9 +11,9 @@ test("desktop toggle enters fullscreen, sets page dimensions only, and restores 
   await h.toggleViewport(page);
   assert.equal(h.window.state, "fullscreen");
   assert.equal(h.sessionStorage.viewportSession.view.width, 1280);
-  assert.equal(h.sessionStorage.viewportSession.view.height, 720);
+  assert.equal(h.sessionStorage.viewportSession.view.height, 1440);
   assert.equal(h.calls.find(call => call.method === "Emulation.setDeviceMetricsOverride").params.mobile, false);
-  assert.deepEqual(h.calls.find(call => call.method === "Emulation.setVisibleSize").params, { width: 1920, height: 1080 });
+  assert.deepEqual(h.calls.find(call => call.method === "Emulation.setVisibleSize").params, { width: 960, height: 1080 });
   assert.equal(h.actions.setBadgeText.text, "ON");
   assert.ok(h.calls.some(call => call.args?.[0]?.commands?.some(command => command.shortcut === "⌃Z")));
   await h.toggleViewport({ id: 99, url: "chrome://settings" });
@@ -207,7 +207,7 @@ test("switching desktop/mobile changes the active page without leaving fullscree
   assert.deepEqual(h.preferences[SCROLL_POINTS_KEY], points);
   assert.equal(h.sessionStorage.scrollPointSequence, undefined);
   await h.message({ type: "SET_MODE", enabled: false, tabId: page.id }, popupSender);
-  assert.equal(h.sessionStorage.viewportSession.view.width, 1920);
+  assert.equal(h.sessionStorage.viewportSession.view.width, 1080);
   assert.equal(h.preferences[MOBILE_SETTINGS_KEY].enabled, false);
 });
 test("an unsuccessful mode switch restores the previous desktop viewport and settings", async () => {
