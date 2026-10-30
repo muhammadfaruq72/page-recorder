@@ -3,7 +3,7 @@ import { prepareRecordingWindow } from "./window-size.js";
 import { loadScrollSettings, SCROLL_SETTINGS_KEY, loadMobileSettings, loadOutputSettings, scaledOutputSize, DEFAULT_OUTPUT_SETTINGS } from "./settings.js";
 import { scrollPage } from "./smooth-scroll.js";
 import { recordingShortcuts } from "./recording-shortcuts.js";
-import { startMobileViewport, refreshMobileViewport, closeMobileViewport, mobileViewportSession, forgetMobileViewport } from "./mobile-viewport.js";
+import { startMobileViewport, refreshMobileViewport, closeMobileViewport, mobileViewportSession, forgetMobileViewport, restoreDetachedMobileViewport, restorePendingMobileViewport } from "./mobile-viewport.js";
 import { hideRecordingCursor, restoreRecordingCursor } from "./recording-cursor.js";
 
 const OFFSCREEN_URL = "offscreen.html";
@@ -262,11 +262,14 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 
 // The debugger API never opens Inspect. Losing the connection ends the
 // recording and preserves the video instead of saving a desktop-sized view.
-chrome.debugger.onDetach.addListener(source => {
+chrome.debugger.onDetach.addListener((source, reason) => {
   if (!Number.isInteger(source.tabId)) return;
   return (async () => {
     const session = await forgetMobileViewport(source.tabId);
-    if (session) await stopMobileRecording(source.tabId, session.sessionId, "Mobile emulation was disconnected.");
+    if (session) {
+      await stopMobileRecording(source.tabId, session.sessionId, "Mobile emulation was disconnected.");
+      if (reason !== "target_closed") await restoreDetachedMobileViewport(session);
+    }
   })().catch(error => console.debug("Mobile connection:", error.message));
 });
 chrome.debugger.onEvent.addListener((source, method, params) => {
@@ -334,6 +337,8 @@ export async function toggleRecording(tab) {
   if (!tab?.id || !/^(https?:|file:)/i.test(tab.url || "")) {
     throw new Error("Open a regular webpage to start recording.");
   }
+
+  await restorePendingMobileViewport(tab.id);
 
   await updateAction({ phase: "starting" });
   const output = await loadOutputSettings();

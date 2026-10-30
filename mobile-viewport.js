@@ -3,6 +3,7 @@ import { scaledOutputSize } from "./settings.js";
 // Native viewport emulation operates on the original tab. Framing policies do
 // not apply, and the browser window and the page's DOM remain in place.
 const SESSION_KEY = "nativeMobileViewport";
+const RESTORE_KEY = "nativeMobileViewportRestore";
 const appliedSizes = new Map();
 
 export async function mobileViewportSession() {
@@ -98,7 +99,7 @@ export async function refreshMobileViewport(session, { settle = false } = {}) {
       throw error;
     }
   }
-  return viewport(session, available, override.scale);
+  return viewport(session, available, Math.min(available.width / session.width, available.height / session.height));
 }
 
 export async function closeMobileViewport(status) {
@@ -135,4 +136,40 @@ export async function forgetMobileViewport(tabId) {
   await chrome.storage.session.remove(SESSION_KEY);
   appliedSizes.delete(session.sessionId);
   return session;
+}
+
+// Older Chromium builds clear device metrics on disconnection but retain the
+// emulated surface size. Briefly reconnect only to restore the browser's own
+// dimensions; never take over an existing debugger or restart capture.
+export async function restoreDetachedMobileViewport(session) {
+  if (!session?.frameInsets) return true;
+  const target = { tabId: session.tabId };
+  let attached = false;
+  try {
+    await chrome.tabs.get(session.tabId);
+    const bounds = await chrome.windows.get(session.windowId);
+    await chrome.debugger.attach(target, "1.3");
+    attached = true;
+    await chrome.debugger.sendCommand(target, "Emulation.clearDeviceMetricsOverride", {});
+    await chrome.debugger.sendCommand(target, "Emulation.setVisibleSize", {
+      width: Math.max(1, bounds.width - session.frameInsets.width),
+      height: Math.max(1, bounds.height - session.frameInsets.height),
+    });
+    await chrome.storage.session.remove(RESTORE_KEY);
+    return true;
+  } catch (error) {
+    await chrome.storage.session.set({ [RESTORE_KEY]: session });
+    console.debug("Mobile surface restoration:", error.message);
+    return false;
+  } finally {
+    if (attached) { try { await chrome.debugger.detach(target); } catch { /* Browser detached first. */ } }
+  }
+}
+
+export async function restorePendingMobileViewport(tabId) {
+  const session = (await chrome.storage.session.get(RESTORE_KEY))[RESTORE_KEY];
+  if (session?.tabId !== tabId) return;
+  if (!await restoreDetachedMobileViewport(session)) {
+    throw new Error("The previous mobile viewport needs restoration. Close Inspect or another debugger on this tab and click Page Recorder again.");
+  }
 }

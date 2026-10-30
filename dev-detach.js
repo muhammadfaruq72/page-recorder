@@ -1,1 +1,0 @@
-(async()=>{const {nativeMobileViewport:session}=await chrome.storage.session.get('nativeMobileViewport');if(session)await chrome.debugger.detach({tabId:session.tabId});document.querySelector('p').textContent='Disconnected the test mobile debugger.';})()

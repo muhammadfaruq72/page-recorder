@@ -395,3 +395,30 @@ test("native mobile capture sizes only the page surface and restores it without 
   const surfaces = h.calls.filter(call => call.method === "Emulation.setVisibleSize");
   assert.deepEqual(surfaces.at(-1).params, { width: 1100, height: 760 });
 });
+
+test("a browser debugger cancellation stops video before repairing the native surface", async () => {
+  const h = await setup({ phase: "recording", tabId: 42, sessionId: "rec", mobileSessionId: "mobile" }, true);
+  h.sessionStorage.nativeMobileViewport = { tabId: 42, windowId: 9, sessionId: "mobile", frameInsets: { width: 16, height: 100 } };
+  await h.events.debugDetached({ tabId: 42 }, "canceled_by_user");
+  const stop = h.calls.findIndex(call => call.type === "STOP");
+  const attach = h.calls.findIndex(call => call.type === "DEBUG_ATTACH");
+  assert.ok(stop >= 0 && attach > stop);
+  assert.deepEqual(h.calls.find(call => call.method === "Emulation.setVisibleSize").params, { width: 1100, height: 760 });
+  assert.equal(h.calls.at(-1).type, "DEBUG_DETACH");
+  assert.equal(h.sessionStorage.nativeMobileViewport, undefined);
+});
+
+test("surface repair never takes over another debugger and retries on the next user invocation", async () => {
+  const h = await setup();
+  const { restoreDetachedMobileViewport, restorePendingMobileViewport } = await import("../mobile-viewport.js");
+  const session = { tabId: 42, windowId: 9, frameInsets: { width: 16, height: 100 } };
+  const attach = chrome.debugger.attach;
+  chrome.debugger.attach = async () => { throw new Error("Another debugger is attached"); };
+  assert.equal(await restoreDetachedMobileViewport(session), false);
+  assert.equal(h.calls.some(call => call.type === "DEBUG_DETACH"), false);
+  assert.ok(h.sessionStorage.nativeMobileViewportRestore);
+  chrome.debugger.attach = attach;
+  await restorePendingMobileViewport(42);
+  assert.equal(h.sessionStorage.nativeMobileViewportRestore, undefined);
+  assert.deepEqual(h.calls.find(call => call.method === "Emulation.setVisibleSize").params, { width: 1100, height: 760 });
+});
